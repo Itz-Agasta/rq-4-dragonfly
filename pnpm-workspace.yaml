@@ -1,0 +1,7 @@
+packages:
+  - ui
+  # a tauri shell package gets listed here when packaging becomes real
+  # (plan.md ADR-1 keeps it a stretch goal, chromium kiosk is the demo path)
+
+# catalog: is for versions shared by two or more packages. There is one package
+# today, so nothing belongs here yet. crates/ is Cargo, ml/ is Python.

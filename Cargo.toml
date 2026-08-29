@@ -1,0 +1,35 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/Itz-Agasta/rq-4-dragonfly"
+
+[workspace.dependencies]
+engine-model = { version = "0.1.0", path = "crates/engine-model" }
+dronecan-ice = { version = "0.1.0", path = "crates/dronecan-ice" }
+twin-core = { version = "0.1.0", path = "crates/twin-core" }
+prognostics = { version = "0.1.0", path = "crates/prognostics" }
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = { version = "2.0.20" }
+anyhow = { version = "1.0.104" }
+tracing = { version = "0.1.44" }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time", "signal"] }
+socketcan = { version = "3.6.2", features = ["tokio"] }
+clap = { version = "4.6.6", features = ["derive"] }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+# no todo lint: the build is stubs for two weeks and just check runs -D warnings
+dbg_macro = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

@@ -1,0 +1,12 @@
+[package]
+name = "dronecan-ice"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true
