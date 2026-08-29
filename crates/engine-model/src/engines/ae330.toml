@@ -1,0 +1,108 @@
+# Turbocharged heavy-fuel aero piston engine, 1991 cm3, four cylinders in line,
+# common-rail direct injection, wastegated fixed-geometry turbocharger,
+# intercooled, FADEC, 1:1.69 reduction gearbox, rated to 32,000 ft.
+#
+# Numbers marked `published` come from the EASA type certificate data sheet E.200
+# for the Austro Engine E4 series and from the manufacturer factsheet, or from the
+# Mercedes-Benz OM640 on whose block that engine is based. Numbers marked
+# `estimated` are not published by anyone and were chosen from engine class, then
+# fitted so the model reproduces the published rating point. Nothing here is
+# measured on the engine itself.
+#
+# Coherence check on the published set: 550 N.m at the propeller divided by the
+# 1.69 gearbox is 325.4 N.m at the crank, and 132 kW at 3880 rpm is 324.9 N.m.
+# The two published figures therefore assume a lossless gearbox, and this model
+# follows them rather than inventing a gearbox efficiency they contradict.
+#
+# https://www.easa.europa.eu/en/downloads/7617/en
+
+name = "E4P-class 180 hp heavy-fuel aero diesel"
+
+[geometry]
+displacement_m3 = 1.991e-3 # published, 1991 cm3
+n_cyl = 4.0 # published
+revs_per_cycle = 2.0 # published, four-stroke
+bore_m = 0.0830 # published, OM640 block
+stroke_m = 0.0920 # published, OM640 block
+compression_ratio = 18.0 # published, OM640 block
+gearbox_ratio = 1.69 # published, crank rpm per propeller rpm
+# Rotating inertia referred to the crankshaft: crank, flywheel and gearbox, plus a
+# representative constant-speed propeller reflected through the gearbox ratio. A
+# different propeller changes this number, which is why it lives in the parameter
+# file rather than in the code.
+inertia_kg_m2 = 0.55 # estimated
+
+[gas]
+# Air properties are the standard cold-air values. Exhaust properties follow the
+# burned-gas values used in the mean value diesel literature.
+# Wahlstrom & Eriksson, Proc IMechE Part D 225(7), 2011, table 6.
+r_air = 287.05 # published, dry air
+cp_air = 1011.0 # published
+gamma_air = 1.3964 # published
+r_exh = 286.0 # published, burned gas
+gamma_exh = 1.2734 # published, burned gas
+
+[fuel]
+# Jet A-1. A heavy-fuel engine burns kerosene, not diesel and certainly not avgas,
+# which is the whole reason it exists on a military airframe.
+lhv_j_per_kg = 43.0e6 # published, ASTM D1655 specification energy content
+stoich_afr = 14.7 # published, kerosene stoichiometric air/fuel mass ratio
+density_kg_m3 = 800.0 # published, nominal at 15 C, spec range 775 to 840
+
+[manifolds]
+# Control volumes. No published figure exists for either; both were chosen from the
+# physical size of a 2 litre automotive diesel intake and exhaust, and they set the
+# manifold filling time constants (roughly 18 ms intake, a few ms exhaust).
+v_im_m3 = 3.0e-3 # estimated, includes the intercooler outlet duct
+v_em_m3 = 1.0e-3 # estimated
+exhaust_area_m2 = 4.70e-4 # estimated, 24 mm equivalent diameter
+
+[cylinder]
+# Volumetric efficiency, eta_vol = c1 sqrt(p_im) + c2 sqrt(omega_e) + c3.
+# Parametric rather than a lookup table so it has three tunable numbers instead of
+# a surface nobody can defend.
+# Wahlstrom & Eriksson 2011, eq. 9.
+c_vol = [6.0e-5, -0.0125, 1.1400] # estimated, fitted to the rating point
+eta_vol_max = 1.00 # estimated, see the clamp note in cylinder.rs
+
+# Combustion quality as an island in the fuel/air equivalence ratio. The three
+# entries are the efficiency factor at zero fuelling, the peak efficiency factor,
+# and the equivalence ratio at which the peak occurs. The peak sits at 0.55, an
+# excess air ratio of 1.82, which is where a common-rail diesel is most efficient.
+# Sivertsson & Eriksson, SIMS 2014, diesel-electric powertrain benchmark, with the
+# load coordinate changed; see the note in cylinder.rs.
+eta_ig_island = [0.45, 0.760, 0.55] # estimated
+
+# In-cylinder ratio of specific heats falls as the charge is enriched. Truncated to
+# first order in the equivalence ratio; the cited source fits a quadratic, which
+# needs part-load data we do not have.
+# Ekberg, Leek & Eriksson, SIMS 59, 2018, eq. 17d.
+gamma_cyl = [1.35, -0.15] # estimated
+
+# Scaling on the cylinder-out gas temperature. Unity because there is no exhaust
+# temperature measurement to fit it against; the cited work fits 1.2563 for a
+# heavy-duty engine at much lower speeds.
+eta_sc = 1.00 # estimated
+
+# Injected fuel mass per cylinder per cycle at full FADEC command. Fitted so that
+# full command at the take-off speed reproduces the published power, torque and
+# fuel consumption simultaneously.
+u_f_max_mg = 68.0 # estimated
+
+[friction]
+# Friction mean effective pressure in bar as a quadratic in crank speed in
+# thousands of rpm, the classical form. Coefficients chosen to give 0.75 bar at
+# 1000 rpm and 2.20 bar at the 3880 rpm take-off speed, which is the normal range
+# for a small automotive-derived diesel; no published figure exists for this engine.
+# Heywood, Internal Combustion Engine Fundamentals, 1988, ch. 13.
+c_fr = [0.07822, 0.12178, 0.55] # estimated
+
+[control]
+# The boost pressure the FADEC holds. At the rating point this gives an excess air
+# ratio of about 1.55, comfortably clear of the smoke limit.
+map_setpoint_pa = 3.10e5 # estimated
+t_im_k = 320.0 # estimated, intercooler outlet on a standard day
+
+[limits]
+rpm_max = 4220.0 # published, maximum engine overspeed
+lambda_min = 1.30 # estimated, smoke limit for a modern common-rail diesel
