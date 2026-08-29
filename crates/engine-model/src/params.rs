@@ -84,9 +84,9 @@ pub struct Manifolds {
     pub v_im_m3: f64,
     /// Exhaust manifold volume, m^3.
     pub v_em_m3: f64,
-    /// Effective flow area of the exhaust outlet, m^2. Stands in for the turbine
-    /// when no turbocharger model is attached.
-    pub exhaust_area_m2: f64,
+    /// Heat-loss conductance of the exhaust manifold, W/K. The product of a heat
+    /// transfer coefficient and a wetted area; only the product is identifiable.
+    pub h_loss_w_per_k: f64,
 }
 
 /// Breathing, combustion efficiency and exhaust temperature.
@@ -117,6 +117,75 @@ pub struct Friction {
     pub c_fr: [f64; 3],
 }
 
+/// Centrifugal compressor and the intercooler behind it.
+#[derive(Clone, Debug, Deserialize)]
+pub struct Compressor {
+    /// Compressor wheel outer radius, m. Sets the head at a given shaft speed.
+    pub r_wheel_m: f64,
+    /// Dimensionless head coefficient at the top of the ellipse.
+    pub psi_max: f64,
+    /// Shaft speed used to normalise corrected speed, rad/s.
+    pub omega_ref: f64,
+    /// Inlet temperature the map is corrected to, K.
+    pub t_ref_k: f64,
+    /// Inlet pressure the map is corrected to, Pa.
+    pub p_ref_pa: f64,
+    /// Choke corrected mass flow as `[a, b, c]` in `a n^2 + b n + c`, with `n` the
+    /// normalised corrected speed. kg/s.
+    pub m_corr_max: [f64; 3],
+    /// Peak isentropic efficiency.
+    pub eta_max: f64,
+    /// Flow coefficient at peak efficiency.
+    pub phi_opt: f64,
+    /// Normalised corrected speed at peak efficiency.
+    pub omega_norm_opt: f64,
+    /// Quadratic form `[q_phi, q_speed, q_cross]` for the efficiency fall-off.
+    pub q_form: [f64; 3],
+    /// Surge line as `[slope, intercept]` in corrected flow.
+    pub surge: [f64; 2],
+    /// Intercooler effectiveness, 0 to 1.
+    pub intercooler_effectiveness: f64,
+}
+
+/// Radial turbine.
+#[derive(Clone, Debug, Deserialize)]
+pub struct Turbine {
+    /// Effective flow area, m^2. The primary lever on boost and therefore on where
+    /// the critical altitude lands.
+    pub area_eff_m2: f64,
+    /// Flow function coefficients `[a, b]` in `a sqrt(1 - Pi^b)`.
+    pub c_flow: [f64; 2],
+    /// Turbine wheel radius, m.
+    pub r_wheel_m: f64,
+    /// Blade speed ratio at peak efficiency.
+    pub bsr_opt: f64,
+    /// Peak combined isentropic and mechanical efficiency.
+    pub eta_max: f64,
+    /// Curvature of the efficiency parabola in blade speed ratio.
+    pub c_bsr: f64,
+}
+
+/// Wastegate.
+#[derive(Clone, Debug, Deserialize)]
+pub struct Wastegate {
+    /// Effective flow area when fully open, m^2.
+    pub area_eff_m2: f64,
+    /// Flow function coefficients `[a, b]` in `a sqrt(1 - Pi^b)`.
+    pub c_flow: [f64; 2],
+}
+
+/// The shaft the compressor and turbine share.
+#[derive(Clone, Debug, Deserialize)]
+pub struct Turbocharger {
+    /// Rotor polar moment of inertia, kg m^2.
+    pub inertia_kg_m2: f64,
+    /// Speed the rotor is certified to contain, rad/s.
+    pub omega_max: f64,
+    /// Speed floor, rad/s. The shaft power balance divides by speed, so it cannot be
+    /// allowed to reach zero.
+    pub omega_min: f64,
+}
+
 /// Engine control set-points.
 #[derive(Clone, Debug, Deserialize)]
 pub struct Control {
@@ -124,9 +193,17 @@ pub struct Control {
     /// altitude the wastegate modulates to maintain it; above, it cannot be reached
     /// and power falls away. That inflection is the critical altitude.
     pub map_setpoint_pa: f64,
-    /// Intercooler outlet temperature, K. Prescribed when no intercooler model is
-    /// attached.
-    pub t_im_k: f64,
+    /// Boost controller proportional gain, wastegate command per Pa of error.
+    pub kp: f64,
+    /// Boost controller integral gain, wastegate command per Pa-second of error.
+    pub ki: f64,
+    /// Anti-windup clamp on the boost controller integrator, Pa-seconds.
+    pub integral_limit: f64,
+    /// Turbocharger speed the controller holds the shaft below, rad/s. Set under
+    /// the certified containment speed, not at it.
+    pub turbo_omega_limit: f64,
+    /// Overspeed loop gain, wastegate command per rad/s of exceedance.
+    pub kp_overspeed: f64,
 }
 
 /// Operating limits the model refuses to leave.
@@ -155,6 +232,14 @@ pub struct EngineParams {
     pub cylinder: Cylinder,
     /// Friction block.
     pub friction: Friction,
+    /// Compressor block.
+    pub compressor: Compressor,
+    /// Turbine block.
+    pub turbine: Turbine,
+    /// Wastegate block.
+    pub wastegate: Wastegate,
+    /// Turbocharger shaft block.
+    pub turbocharger: Turbocharger,
     /// Control set-point block.
     pub control: Control,
     /// Limits block.
@@ -174,7 +259,67 @@ impl EngineParams {
     }
 
     fn validate(&self) -> Result<(), ParamError> {
-        let positive: [(&'static str, f64, &'static str); 15] = [
+        let positive: [(&'static str, f64, &'static str); 26] = [
+            (
+                "manifolds.h_loss_w_per_k",
+                self.manifolds.h_loss_w_per_k,
+                "scales exhaust cooling",
+            ),
+            (
+                "compressor.r_wheel_m",
+                self.compressor.r_wheel_m,
+                "squares into the head",
+            ),
+            (
+                "compressor.omega_ref",
+                self.compressor.omega_ref,
+                "normalises corrected speed",
+            ),
+            (
+                "compressor.t_ref_k",
+                self.compressor.t_ref_k,
+                "divides the speed correction",
+            ),
+            (
+                "compressor.p_ref_pa",
+                self.compressor.p_ref_pa,
+                "divides the flow correction",
+            ),
+            (
+                "compressor.eta_max",
+                self.compressor.eta_max,
+                "divides the compressor power",
+            ),
+            (
+                "turbine.area_eff_m2",
+                self.turbine.area_eff_m2,
+                "scales turbine flow",
+            ),
+            (
+                "turbine.r_wheel_m",
+                self.turbine.r_wheel_m,
+                "scales blade speed ratio",
+            ),
+            (
+                "wastegate.area_eff_m2",
+                self.wastegate.area_eff_m2,
+                "scales the bypass flow",
+            ),
+            (
+                "turbocharger.inertia_kg_m2",
+                self.turbocharger.inertia_kg_m2,
+                "divides the shaft ODE",
+            ),
+            (
+                "turbocharger.omega_min",
+                self.turbocharger.omega_min,
+                "keeps the shaft balance finite",
+            ),
+            (
+                "turbocharger.omega_max",
+                self.turbocharger.omega_max,
+                "bounds the shaft speed",
+            ),
             (
                 "geometry.displacement_m3",
                 self.geometry.displacement_m3,
@@ -244,11 +389,6 @@ impl EngineParams {
                 "control.map_setpoint_pa",
                 self.control.map_setpoint_pa,
                 "sets the boost target",
-            ),
-            (
-                "control.t_im_k",
-                self.control.t_im_k,
-                "divides the ideal-gas relation",
             ),
         ];
         for (field, value, reason) in positive {

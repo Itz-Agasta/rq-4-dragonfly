@@ -1,95 +1,97 @@
 //! Transient response to a step in the fuelling command.
 //!
 //! Writes CSV to stdout. The engine starts at part load driving a propeller, the
-//! FADEC command steps to full, and the model integrates manifold filling, the
-//! smoke limiter and crankshaft inertia through the transient.
+//! FADEC command steps to full, and the model integrates turbocharger shaft
+//! acceleration, manifold filling, the smoke limiter and crankshaft inertia through
+//! the transient. Turbocharger lag is the shaft spinning up, not a lag constant.
 //!
-//! Two things here are stand-ins rather than model, and both are outside the crate
-//! for exactly that reason.
-//!
-//! The flow delivered into the intake manifold follows the demand at the boost
-//! set-point through a first-order lag. A turbocharger does not respond instantly
-//! because its shaft has to accelerate, and until a turbocharger model exists that
-//! delay has to come from somewhere; a lag is the honest cheapest version of it and
-//! it is what makes the excess air ratio dip after the step. Replace it, do not tune
-//! it.
-//!
-//! The propeller is treated as fixed pitch, absorbing torque proportional to the
-//! square of speed. The real unit is constant speed and would hold rpm through the
-//! step by coarsening blade pitch, which is a governor and belongs with the airframe
-//! rather than with the engine.
+//! The propeller is treated as constant speed, which is what the real unit is: it
+//! coarsens blade pitch to absorb exactly the torque the engine makes, so crank speed
+//! is held through the step. That is deliberate here rather than incidental. With the
+//! crank pinned, the only dynamics left are manifold filling and the turbocharger
+//! shaft, so the boost trace **is** the spool and the lag can be read off it. A
+//! fixed-pitch propeller would let the engine accelerate at the same time and the two
+//! transients would be impossible to separate.
 
-use engine_model::{EngineParams, Inputs, State, atmosphere, engines, integrator};
+use engine_model::{EngineParams, Inputs, State, atmosphere, control, engines, integrator};
 
-/// Time constant of the intake flow stand-in, s.
-const SPOOL_TAU: f64 = 0.9;
 /// Simulated duration, s.
-const DURATION: f64 = 8.0;
+const DURATION: f64 = 10.0;
 /// Fuelling command step time, s.
-const STEP_AT: f64 = 1.0;
+const STEP_AT: f64 = 2.0;
 
 fn main() {
     let p: EngineParams = engines::ae330();
-    let p_amb = atmosphere::isa(0.0).p;
+    let amb = atmosphere::isa(0.0);
 
-    // Fixed-pitch propeller constant, sized to absorb the rated torque at the rated
-    // speed so the engine settles near its rating rather than at an arbitrary point.
-    let rated_omega = 3880.0 * std::f64::consts::TAU / 60.0;
-    let k_prop = 325.0 / (rated_omega * rated_omega);
-
-    let mut x = State::at_rest(p_amb, 2000.0);
-    x.p_im = 1.6e5;
-    let mut w_intake = 0.10;
+    let mut x = State::at_rest(amb.p, 3000.0);
+    let mut boost = control::BoostController::new();
     let mut u = Inputs {
         fuel_cmd: 0.30,
-        w_intake,
-        p_amb,
+        wastegate: 1.0,
+        p_amb: amb.p,
+        t_amb: amb.t,
         load_torque: 0.0,
     };
 
     println!(
-        "t_s,fuel_cmd,rpm,map_bar,pem_bar,w_air_kgs,w_intake_kgs,lambda,\
-         torque_nm,power_kw,egt_k,fuel_lph"
+        "t_s,fuel_cmd,rpm,turbo_rpm,wastegate,map_bar,pem_bar,t_im_k,w_air_kgs,\
+         lambda,torque_nm,power_kw,egt_k,eta_c,fuel_lph"
     );
 
+    let mut boost_trace: Vec<(f64, f64)> = Vec::new();
     let steps = (DURATION / integrator::DT).round() as u32;
     for i in 0..=steps {
         let t = f64::from(i) * integrator::DT;
         if t >= STEP_AT {
             u.fuel_cmd = 1.0;
         }
-
+        u.wastegate = boost.update(&p, x.p_im, x.omega_tc, integrator::DT);
         let o = engine_model::evaluate(&p, &x, &u);
-        u.load_torque = k_prop * x.omega_e * x.omega_e;
-
+        u.load_torque = o.torque_brake;
         if i % 10 == 0 {
             println!(
-                "{t:.3},{:.2},{:.1},{:.4},{:.4},{:.5},{:.5},{:.3},{:.2},{:.3},{:.1},{:.2}",
+                "{t:.3},{:.2},{:.1},{:.0},{:.4},{:.4},{:.4},{:.1},{:.5},{:.3},\
+                 {:.2},{:.3},{:.1},{:.4},{:.2}",
                 u.fuel_cmd,
                 x.rpm(),
+                x.turbo_rpm(),
+                u.wastegate,
                 x.p_im / 1e5,
                 x.p_em / 1e5,
+                o.t_intake,
                 o.w_air,
-                u.w_intake,
                 o.lambda.min(99.0),
                 o.torque_brake,
                 o.power_brake_w / 1000.0,
                 o.t_exhaust,
+                o.eta_compressor,
                 o.fuel_litres_per_hour(&p),
             );
         }
 
-        // Intake flow relaxes towards what the cylinders would swallow at the boost
-        // set-point. See the module note: this is a placeholder for shaft dynamics.
-        let demand = engine_model::cylinder::air_flow(
-            &p,
-            p.control.map_setpoint_pa,
-            x.omega_e,
-            p.control.t_im_k,
-        );
-        w_intake += (demand - w_intake) * integrator::DT / SPOOL_TAU;
-        u.w_intake = w_intake;
-
+        boost_trace.push((t, x.p_im));
         x = engine_model::step(&p, &x, &u, integrator::DT);
+    }
+
+    // Spool time, reported rather than asserted: the interval from the fuelling step
+    // to the moment boost first reaches 90% of the rise it eventually makes.
+    let before = boost_trace
+        .iter()
+        .filter(|(t, _)| *t < STEP_AT)
+        .map(|(_, p)| *p)
+        .next_back()
+        .unwrap_or(amb.p);
+    let settled = boost_trace.last().map_or(amb.p, |(_, p)| *p);
+    let target = before + 0.9 * (settled - before);
+    if let Some((t, _)) = boost_trace
+        .iter()
+        .find(|(t, p)| *t >= STEP_AT && *p >= target)
+    {
+        eprintln!(
+            "spool to 90% of {:.2} bar: {:.2} s",
+            settled / 1e5,
+            t - STEP_AT
+        );
     }
 }

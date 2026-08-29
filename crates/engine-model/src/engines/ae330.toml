@@ -34,7 +34,8 @@ inertia_kg_m2 = 0.55 # estimated
 
 [gas]
 # Air properties are the standard cold-air values. Exhaust properties follow the
-# burned-gas values used in the mean value diesel literature.
+# burned-gas values used in the mean value diesel literature. Exhaust cp is derived
+# from these two rather than listed, so the three can never disagree.
 # Wahlstrom & Eriksson, Proc IMechE Part D 225(7), 2011, table 6.
 r_air = 287.05 # published, dry air
 cp_air = 1011.0 # published
@@ -55,7 +56,12 @@ density_kg_m3 = 800.0 # published, nominal at 15 C, spec range 775 to 840
 # manifold filling time constants (roughly 18 ms intake, a few ms exhaust).
 v_im_m3 = 3.0e-3 # estimated, includes the intercooler outlet duct
 v_em_m3 = 1.0e-3 # estimated
-exhaust_area_m2 = 4.70e-4 # estimated, 24 mm equivalent diameter
+# Exhaust manifold heat loss, as the product of a heat transfer coefficient and a
+# wetted area; only the product is identifiable without a manifold skin measurement.
+# Sized for roughly a 50 K drop between the port and the turbine inlet at full flow,
+# which is why a thermocouple in the manifold reads cooler than the cylinder-out gas.
+# Eriksson, "Mean value models for exhaust system temperatures", SAE 2002-01-0374.
+h_loss_w_per_k = 23.0 # estimated
 
 [cylinder]
 # Volumetric efficiency, eta_vol = c1 sqrt(p_im) + c2 sqrt(omega_e) + c3.
@@ -87,7 +93,7 @@ eta_sc = 1.00 # estimated
 # Injected fuel mass per cylinder per cycle at full FADEC command. Fitted so that
 # full command at the take-off speed reproduces the published power, torque and
 # fuel consumption simultaneously.
-u_f_max_mg = 68.0 # estimated
+u_f_max_mg = 67.4 # estimated
 
 [friction]
 # Friction mean effective pressure in bar as a quadratic in crank speed in
@@ -97,11 +103,66 @@ u_f_max_mg = 68.0 # estimated
 # Heywood, Internal Combustion Engine Fundamentals, 1988, ch. 13.
 c_fr = [0.07822, 0.12178, 0.55] # estimated
 
+[compressor]
+# Ellipse model. The wheel radius and head coefficient set the pressure ratio the
+# wheel can raise at a given speed; reaching the 3.10 bar set-point at sea level puts
+# the shaft near 140,000 rpm, comfortably under the 178,000 rpm the type certificate
+# demonstrates containment for. That margin is what makes the architecture viable and
+# it was checked before any of this was written.
+# Leufven & Eriksson, Control Engineering Practice 21(12), 2013.
+r_wheel_m = 0.0285 # estimated, 57 mm wheel; sized so rated power holds to 11,000 ft
+psi_max = 1.65 # estimated, dimensionless head coefficient
+omega_ref = 18000.0 # estimated, normalisation near the containment speed
+t_ref_k = 288.15 # published, ISA sea level, the correction reference
+p_ref_pa = 101325.0 # published, ISA sea level, the correction reference
+m_corr_max = [0.0252, 0.2053, 0.1153] # estimated, choke flow vs normalised speed
+eta_max = 0.78 # estimated, peak for a small automotive-class compressor
+phi_opt = 0.0600 # estimated, flow coefficient at the efficiency peak
+omega_norm_opt = 0.78 # estimated
+q_form = [79.27, 0.7985, -1.4358] # estimated, efficiency island shape
+surge = [14.5, 0.60] # estimated, placed to give the design envelope a plausible margin
+intercooler_effectiveness = 0.77 # estimated, air to air, ram cooled
+
+[turbine]
+# Effective area is the primary lever on boost, and therefore on where the critical
+# altitude falls. Sized so the wastegate reaches its stop at the rated critical
+# altitude rather than by picking a number that makes sea level look right.
+area_eff_m2 = 4.95e-4 # estimated, the primary lever on where the knee falls
+c_flow = [0.6859, 2.3633] # estimated, radial turbine flow function
+r_wheel_m = 0.020 # estimated, 40 mm wheel
+bsr_opt = 0.622 # estimated, blade speed ratio at peak efficiency
+eta_max = 0.7075 # estimated, isentropic times mechanical
+c_bsr = 2.0245 # estimated, curvature of the efficiency parabola
+
+[wastegate]
+area_eff_m2 = 2.00e-4 # estimated
+c_flow = [0.6666, 5.3517] # estimated
+
+[turbocharger]
+# Rotor inertia. No figure is published for this turbocharger. A modelled diesel
+# compressor wheel is 6e-5 kg m2 (Mishra & Saad 2017) and a 6.7 litre engine's turbo
+# is 1.87e-4 (Sivertsson & Eriksson 2014); scaling the latter by displacement gives
+# 2.5e-5, which is the value used. It is corroborated rather than chosen: at twice
+# this figure the modelled spool is 4.2 s, and turbochargers of this size are
+# measured at 1 to 2 s.
+inertia_kg_m2 = 2.5e-5 # estimated
+omega_max = 18640.0 # published, 178,000 rpm demonstrated containment
+omega_min = 300.0 # estimated, floor so the shaft power balance stays finite
+
 [control]
 # The boost pressure the FADEC holds. At the rating point this gives an excess air
 # ratio of about 1.55, comfortably clear of the smoke limit.
 map_setpoint_pa = 3.10e5 # estimated
-t_im_k = 320.0 # estimated, intercooler outlet on a standard day
+# Gains are per pascal of error, so they look small. Sized for a loop an order of
+# magnitude slower than the turbocharger shaft, because a boost controller faster
+# than its actuator chatters against the wastegate stops.
+kp = 8.0e-6 # estimated
+ki = 2.0e-6 # estimated
+integral_limit = 5.0e6 # estimated, anti-windup clamp
+# Turbocharger overspeed supervision. Held at 95% of the certified containment
+# speed, because containment is what the rotor survives once, not what it runs at.
+turbo_omega_limit = 17700.0 # estimated, 169,000 rpm
+kp_overspeed = 2.0e-3 # estimated
 
 [limits]
 rpm_max = 4220.0 # published, maximum engine overspeed

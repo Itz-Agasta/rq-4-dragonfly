@@ -212,7 +212,7 @@ mod tests {
     fn full_command_is_unclipped_at_the_rating_point() {
         let p = engines::ae330();
         let om = omega(3880.0);
-        let w_air = air_flow(&p, p.control.map_setpoint_pa, om, p.control.t_im_k);
+        let w_air = air_flow(&p, p.control.map_setpoint_pa, om, 320.0);
         let u_f = injected_fuel(&p, 1.0, w_air, om);
         assert!((u_f - p.cylinder.u_f_max_mg).abs() < 1e-9, "u_f {u_f}");
         let lam = lambda(&p, w_air, fuel_flow(&p, u_f, om));

@@ -41,6 +41,8 @@
 #![forbid(unsafe_code)]
 
 pub mod atmosphere;
+pub mod compressor;
+pub mod control;
 pub mod cylinder;
 pub mod engines;
 pub mod flow;
@@ -48,6 +50,7 @@ pub mod friction;
 pub mod integrator;
 pub mod manifold;
 pub mod params;
+pub mod turbine;
 
 pub use params::{EngineParams, ParamError};
 
@@ -66,6 +69,8 @@ pub struct State {
     pub p_em: f64,
     /// Crankshaft speed, rad/s.
     pub omega_e: f64,
+    /// Turbocharger shaft speed, rad/s.
+    pub omega_tc: f64,
 }
 
 impl Add for State {
@@ -75,6 +80,7 @@ impl Add for State {
             p_im: self.p_im + o.p_im,
             p_em: self.p_em + o.p_em,
             omega_e: self.omega_e + o.omega_e,
+            omega_tc: self.omega_tc + o.omega_tc,
         }
     }
 }
@@ -86,18 +92,21 @@ impl Mul<f64> for State {
             p_im: self.p_im * k,
             p_em: self.p_em * k,
             omega_e: self.omega_e * k,
+            omega_tc: self.omega_tc * k,
         }
     }
 }
 
 impl State {
-    /// A plausible starting point: manifolds at ambient, engine at the given speed.
+    /// A plausible starting point: manifolds at ambient, engine at the given speed,
+    /// turbocharger idling.
     #[must_use]
     pub fn at_rest(p_amb: f64, rpm: f64) -> Self {
         Self {
             p_im: p_amb,
             p_em: p_amb,
             omega_e: rpm * std::f64::consts::TAU / 60.0,
+            omega_tc: 2000.0,
         }
     }
 
@@ -106,6 +115,12 @@ impl State {
     pub fn rpm(&self) -> f64 {
         self.omega_e * 60.0 / std::f64::consts::TAU
     }
+
+    /// Turbocharger speed in rpm.
+    #[must_use]
+    pub fn turbo_rpm(&self) -> f64 {
+        self.omega_tc * 60.0 / std::f64::consts::TAU
+    }
 }
 
 /// Everything acting on the engine from outside it.
@@ -113,11 +128,15 @@ impl State {
 pub struct Inputs {
     /// FADEC fuelling command, 0 to 1. The load actuator of a diesel.
     pub fuel_cmd: f64,
-    /// Mass flow delivered into the intake manifold, kg/s. Becomes an output of the
-    /// compressor once a turbocharger model is attached.
-    pub w_intake: f64,
+    /// Wastegate position, 0 shut to 1 fully open. An input rather than a state
+    /// because the controller that drives it is not part of the engine; see
+    /// [`control::BoostController`].
+    pub wastegate: f64,
     /// Ambient static pressure, Pa. From [`atmosphere::isa`] and the altitude.
     pub p_amb: f64,
+    /// Ambient static temperature, K. Compressor inlet, intercooler sink, and the
+    /// reference the exhaust manifold loses heat to.
+    pub t_amb: f64,
     /// Torque absorbed by whatever the crankshaft drives, N.m, referred to the
     /// crankshaft. A constant-speed propeller unit makes this the governor output.
     pub load_torque: f64,
@@ -130,6 +149,18 @@ pub struct Inputs {
 /// be available here to be compared against.
 #[derive(Clone, Copy, Debug)]
 pub struct Outputs {
+    /// Intake charge temperature after the intercooler, K.
+    pub t_intake: f64,
+    /// Compressor pressure ratio.
+    pub compressor_ratio: f64,
+    /// Compressor mass flow, kg/s.
+    pub w_compressor: f64,
+    /// Compressor isentropic efficiency.
+    pub eta_compressor: f64,
+    /// Shaft power absorbed by the compressor, W.
+    pub power_compressor: f64,
+    /// Margin to the compressor surge line, in pressure-ratio units.
+    pub surge_margin: f64,
     /// Volumetric efficiency.
     pub eta_vol: f64,
     /// Air mass flow into the cylinders, kg/s.
@@ -159,9 +190,20 @@ pub struct Outputs {
     /// Propeller speed, rpm.
     pub rpm_prop: f64,
     /// Temperature of the gas leaving the cylinders, K.
+    pub t_cylinder_out: f64,
+    /// Temperature of the gas reaching the turbine, K. This is what a manifold
+    /// thermocouple reads, and it is cooler than [`Outputs::t_cylinder_out`].
     pub t_exhaust: f64,
-    /// Mass flow leaving the exhaust manifold, kg/s.
-    pub w_exhaust_out: f64,
+    /// Mass flow through the turbine, kg/s.
+    pub w_turbine: f64,
+    /// Mass flow bypassing the turbine, kg/s.
+    pub w_wastegate: f64,
+    /// Turbine blade speed ratio.
+    pub blade_speed_ratio: f64,
+    /// Turbine combined isentropic and mechanical efficiency.
+    pub eta_turbine: f64,
+    /// Shaft power delivered by the turbine, W.
+    pub power_turbine: f64,
 }
 
 impl Outputs {
@@ -180,15 +222,22 @@ impl Outputs {
     pub fn fuel_litres_per_hour(&self, p: &EngineParams) -> f64 {
         self.w_fuel / p.fuel.density_kg_m3 * 3.6e6
     }
+
+    /// Boost pressure above ambient, Pa.
+    #[must_use]
+    pub fn boost_pa(&self, p_amb: f64, p_im: f64) -> f64 {
+        p_im - p_amb
+    }
 }
 
 /// Evaluate every algebraic quantity at one state and set of inputs.
 #[must_use]
 pub fn evaluate(p: &EngineParams, x: &State, u: &Inputs) -> Outputs {
-    let t_im = p.control.t_im_k;
+    let comp = compressor::operate(p, x.omega_tc, u.p_amb, u.t_amb, x.p_im);
+    let t_intake = compressor::intercooler_outlet(p, comp.outlet_temperature, u.t_amb);
 
     let eta_vol = cylinder::volumetric_efficiency(p, x.p_im, x.omega_e);
-    let w_air = cylinder::air_flow(p, x.p_im, x.omega_e, t_im);
+    let w_air = cylinder::air_flow(p, x.p_im, x.omega_e, t_intake);
     let u_f_mg = cylinder::injected_fuel(p, u.fuel_cmd, w_air, x.omega_e);
     let w_fuel = cylinder::fuel_flow(p, u_f_mg, x.omega_e);
     let lambda = cylinder::lambda(p, w_air, w_fuel);
@@ -200,10 +249,19 @@ pub fn evaluate(p: &EngineParams, x: &State, u: &Inputs) -> Outputs {
     let torque_pumping = friction::pumping_torque(p, x.p_im, x.p_em);
     let torque_brake = torque_indicated - torque_friction - torque_pumping;
 
-    let t_exhaust = cylinder::exhaust_temperature(p, w_air, w_fuel, x.p_im, x.p_em, t_im);
-    let w_exhaust_out = manifold::exhaust_outflow(p, x.p_em, u.p_amb, t_exhaust);
+    let t_cylinder_out = cylinder::exhaust_temperature(p, w_air, w_fuel, x.p_im, x.p_em, t_intake);
+    let t_exhaust = manifold::exhaust_gas_temperature(p, t_cylinder_out, u.t_amb, w_air + w_fuel);
+
+    let turb = turbine::operate(p, x.omega_tc, x.p_em, u.p_amb, t_exhaust);
+    let w_wastegate = turbine::wastegate_flow(p, u.wastegate, x.p_em, u.p_amb, t_exhaust);
 
     Outputs {
+        t_intake,
+        compressor_ratio: comp.pressure_ratio,
+        w_compressor: comp.mass_flow,
+        eta_compressor: comp.efficiency,
+        power_compressor: comp.power,
+        surge_margin: comp.surge_margin,
         eta_vol,
         w_air,
         u_f_mg,
@@ -218,8 +276,13 @@ pub fn evaluate(p: &EngineParams, x: &State, u: &Inputs) -> Outputs {
         power_brake_w: torque_brake * x.omega_e,
         torque_prop: torque_brake * p.geometry.gearbox_ratio,
         rpm_prop: x.rpm() / p.geometry.gearbox_ratio,
+        t_cylinder_out,
         t_exhaust,
-        w_exhaust_out,
+        w_turbine: turb.mass_flow,
+        w_wastegate,
+        blade_speed_ratio: turb.blade_speed_ratio,
+        eta_turbine: turb.efficiency,
+        power_turbine: turb.power,
     }
 }
 
@@ -227,10 +290,21 @@ pub fn evaluate(p: &EngineParams, x: &State, u: &Inputs) -> Outputs {
 #[must_use]
 pub fn derivative(p: &EngineParams, x: &State, u: &Inputs) -> State {
     let o = evaluate(p, x, u);
+    // Floored, not clamped after the fact: the shaft power balance divides by speed,
+    // and a turbocharger that has coasted to a stop must still be able to be spun up
+    // by exhaust energy rather than dividing by zero.
+    let omega_tc = x.omega_tc.max(p.turbocharger.omega_min);
     State {
-        p_im: manifold::intake_pressure_rate(p, p.control.t_im_k, u.w_intake, o.w_air),
-        p_em: manifold::exhaust_pressure_rate(p, o.t_exhaust, o.w_air + o.w_fuel, o.w_exhaust_out),
+        p_im: manifold::intake_pressure_rate(p, o.t_intake, o.w_compressor, o.w_air),
+        p_em: manifold::exhaust_pressure_rate(
+            p,
+            o.t_exhaust,
+            o.w_air + o.w_fuel,
+            o.w_turbine + o.w_wastegate,
+        ),
         omega_e: (o.torque_brake - u.load_torque) / p.geometry.inertia_kg_m2,
+        omega_tc: (o.power_turbine - o.power_compressor)
+            / (omega_tc * p.turbocharger.inertia_kg_m2),
     }
 }
 
@@ -238,9 +312,9 @@ pub fn derivative(p: &EngineParams, x: &State, u: &Inputs) -> State {
 ///
 /// Inputs are held constant across the step, which is the standard zero-order hold
 /// and is exact for a model driven by a digital controller at or above the step
-/// rate. Pressures and speed are floored at zero afterwards: a manifold pressure
-/// cannot go negative, and a transient that drove one there would otherwise put a
-/// negative number under a square root on the next step.
+/// rate. Pressures and speeds are floored afterwards: a manifold pressure cannot go
+/// negative, and a transient that drove one there would otherwise put a negative
+/// number under a square root on the next step.
 #[must_use]
 pub fn step(p: &EngineParams, x: &State, u: &Inputs, dt: f64) -> State {
     let next = integrator::rk4(*x, dt, |s| derivative(p, &s, u));
@@ -248,6 +322,9 @@ pub fn step(p: &EngineParams, x: &State, u: &Inputs, dt: f64) -> State {
         p_im: next.p_im.max(1.0),
         p_em: next.p_em.max(1.0),
         omega_e: next.omega_e.max(0.0),
+        omega_tc: next
+            .omega_tc
+            .clamp(p.turbocharger.omega_min, p.turbocharger.omega_max),
     }
 }
 
@@ -259,31 +336,42 @@ mod tests {
         rpm * std::f64::consts::TAU / 60.0
     }
 
+    fn sea_level(fuel_cmd: f64, wastegate: f64) -> Inputs {
+        let a = atmosphere::isa(0.0);
+        Inputs {
+            fuel_cmd,
+            wastegate,
+            p_amb: a.p,
+            t_amb: a.t,
+            load_torque: 0.0,
+        }
+    }
+
     /// The published take-off rating: 132 kW and 550 N.m at the propeller, at a
     /// crank speed of 3880 rpm, burning 39 litres an hour.
     #[test]
     fn reproduces_the_published_rating_point() {
         let p = engines::ae330();
-        let p_amb = atmosphere::isa(0.0).p;
         let x = State {
             p_im: p.control.map_setpoint_pa,
             p_em: 3.45e5,
             omega_e: omega(3880.0),
+            omega_tc: 14_900.0,
         };
-        let u = Inputs {
-            fuel_cmd: 1.0,
-            w_intake: 0.0,
-            p_amb,
-            load_torque: 0.0,
-        };
-        let o = evaluate(&p, &x, &u);
+        let o = evaluate(&p, &x, &sea_level(1.0, 0.0));
 
-        let power_error = (o.power_brake_w - 132_000.0).abs() / 132_000.0;
-        let torque_error = (o.torque_prop - 550.0).abs() / 550.0;
-        let fuel_error = (o.fuel_litres_per_hour(&p) - 39.0).abs() / 39.0;
-        assert!(power_error < 0.10, "power {} W", o.power_brake_w);
-        assert!(torque_error < 0.10, "prop torque {} N.m", o.torque_prop);
-        assert!(fuel_error < 0.10, "fuel {} L/h", o.fuel_litres_per_hour(&p));
+        assert!(
+            (o.power_brake_w - 132_000.0).abs() / 132_000.0 < 0.10,
+            "{} W",
+            o.power_brake_w
+        );
+        assert!(
+            (o.torque_prop - 550.0).abs() / 550.0 < 0.10,
+            "{} N.m",
+            o.torque_prop
+        );
+        let lph = o.fuel_litres_per_hour(&p);
+        assert!((lph - 39.0).abs() / 39.0 < 0.10, "{lph} L/h");
         assert!((o.rpm_prop - 2296.0).abs() < 5.0, "prop {} rpm", o.rpm_prop);
 
         let bsfc = o.bsfc_g_per_kwh().unwrap();
@@ -294,38 +382,62 @@ mod tests {
     fn motoring_produces_negative_torque_and_no_bsfc() {
         let p = engines::ae330();
         let x = State::at_rest(101_325.0, 2000.0);
-        let u = Inputs {
-            fuel_cmd: 0.0,
-            w_intake: 0.0,
-            p_amb: 101_325.0,
-            load_torque: 0.0,
-        };
-        let o = evaluate(&p, &x, &u);
+        let o = evaluate(&p, &x, &sea_level(0.0, 0.0));
         assert!(o.torque_brake < 0.0);
         assert!(o.bsfc_g_per_kwh().is_none());
         assert!(o.lambda.is_infinite());
     }
 
+    /// Run the whole loop closed, from a cold manifold to steady state at the rated
+    /// speed, and check the boost controller finds the set-point without the shaft
+    /// running away.
+    #[test]
+    fn the_closed_loop_settles_on_the_boost_set_point() {
+        let p = engines::ae330();
+        let mut x = State::at_rest(atmosphere::isa(0.0).p, 3880.0);
+        let mut boost = control::BoostController::new();
+        let mut u = sea_level(1.0, 1.0);
+
+        for _ in 0..(20.0 / integrator::DT) as u32 {
+            u.wastegate = boost.update(&p, x.p_im, x.omega_tc, integrator::DT);
+            // Perfect governor: the propeller absorbs exactly what the engine makes,
+            // which is what holds crank speed while the turbocharger finds its own.
+            u.load_torque = evaluate(&p, &x, &u).torque_brake;
+            x = step(&p, &x, &u, integrator::DT);
+            assert!(x.p_im.is_finite() && x.omega_tc.is_finite());
+        }
+
+        let error = (x.p_im - p.control.map_setpoint_pa).abs() / p.control.map_setpoint_pa;
+        assert!(error < 0.05, "settled at {} Pa", x.p_im);
+        assert!(
+            x.omega_tc < p.turbocharger.omega_max,
+            "turbo {} rad/s",
+            x.omega_tc
+        );
+        assert!(
+            evaluate(&p, &x, &u).surge_margin > 0.0,
+            "compressor is surging"
+        );
+    }
+
     #[test]
     fn state_stays_finite_over_a_full_load_step() {
         let p = engines::ae330();
-        let p_amb = atmosphere::isa(0.0).p;
-        let mut x = State::at_rest(p_amb, 2000.0);
-        let mut u = Inputs {
-            fuel_cmd: 0.0,
-            w_intake: 0.05,
-            p_amb,
-            load_torque: 0.0,
-        };
-        for i in 0..4000 {
+        let mut x = State::at_rest(atmosphere::isa(0.0).p, 2000.0);
+        let mut boost = control::BoostController::new();
+        let mut u = sea_level(0.0, 1.0);
+        for i in 0..8000 {
             if i == 1000 {
                 u.fuel_cmd = 1.0;
-                u.w_intake = 0.20;
             }
-            x = step(&p, &x, &u, integrator::DT);
+            u.wastegate = boost.update(&p, x.p_im, x.omega_tc, integrator::DT);
             u.load_torque = evaluate(&p, &x, &u).torque_brake;
+            x = step(&p, &x, &u, integrator::DT);
             assert!(
-                x.p_im.is_finite() && x.p_em.is_finite() && x.omega_e.is_finite(),
+                x.p_im.is_finite()
+                    && x.p_em.is_finite()
+                    && x.omega_e.is_finite()
+                    && x.omega_tc.is_finite(),
                 "diverged at step {i}: {x:?}"
             );
         }
