@@ -53,17 +53,17 @@ pub fn head_conductance(p: &EngineParams, omega_e: f64) -> f64 {
     p.thermal.head_conductance_w_per_k * (omega_e.max(0.0) / reference).powf(0.8)
 }
 
-/// Fraction of the radiator that the thermostat is admitting flow to, 0 to 1.
+/// Fraction of a heat exchanger's air flow that its thermostat is admitting, 0 to 1.
 ///
-/// A cold engine has to be allowed to warm up, and at altitude the radiator has far
-/// more capacity than the engine needs, so without a thermostat the coolant would
-/// settle far below its working temperature. The bypass leak is what stops the loop
-/// from closing completely.
+/// A cold engine has to be allowed to warm up, and at altitude both the radiator and
+/// the oil cooler have far more capacity than the engine needs, so without a
+/// thermostat the coolant and the oil would settle well below their working
+/// temperatures. The bypass leak is what stops the loop from closing completely.
+///
+/// Shared by the coolant and the oil circuits: same behaviour, different set-points.
 #[must_use]
-pub fn thermostat(p: &EngineParams, t_coolant: f64) -> f64 {
-    let t = &p.cooling;
-    let open = (t_coolant - t.thermostat_open_k) / t.thermostat_band_k;
-    t.bypass_fraction + (1.0 - t.bypass_fraction) * open.clamp(0.0, 1.0)
+pub fn thermostat(t: f64, open_k: f64, band_k: f64, bypass: f64) -> f64 {
+    bypass + (1.0 - bypass) * ((t - open_k) / band_k).clamp(0.0, 1.0)
 }
 
 /// Cooling air mass flow through a heat exchanger of the given frontal area, kg/s.
@@ -106,8 +106,14 @@ pub fn coolant_temperature_rate(
     rho: f64,
     tas_m_s: f64,
 ) -> f64 {
-    let w_air =
-        ram_air_flow(p, p.cooling.radiator_area_m2, rho, tas_m_s) * thermostat(p, t_coolant);
+    let c = &p.cooling;
+    let admitted = thermostat(
+        t_coolant,
+        c.thermostat_open_k,
+        c.thermostat_band_k,
+        c.bypass_fraction,
+    );
+    let w_air = ram_air_flow(p, c.radiator_area_m2, rho, tas_m_s) * admitted;
     let rejected = exchanger_heat(
         p.cooling.radiator_effectiveness,
         w_air,
@@ -150,11 +156,18 @@ mod tests {
     #[test]
     fn the_thermostat_shuts_when_cold_and_opens_when_hot() {
         let p = engines::ae330();
-        let cold = thermostat(&p, 280.0);
-        let hot = thermostat(&p, 400.0);
-        assert!((cold - p.cooling.bypass_fraction).abs() < 1e-12);
-        assert!((hot - 1.0).abs() < 1e-12);
-        assert!(cold < thermostat(&p, p.cooling.thermostat_open_k + 3.0));
+        let c = &p.cooling;
+        let at = |t| {
+            thermostat(
+                t,
+                c.thermostat_open_k,
+                c.thermostat_band_k,
+                c.bypass_fraction,
+            )
+        };
+        assert!((at(280.0) - c.bypass_fraction).abs() < 1e-12);
+        assert!((at(400.0) - 1.0).abs() < 1e-12);
+        assert!(at(280.0) < at(c.thermostat_open_k + 3.0));
     }
 
     #[test]

@@ -45,7 +45,6 @@ pub mod compressor;
 pub mod control;
 pub mod cylinder;
 pub mod engines;
-pub mod flow;
 pub mod friction;
 pub mod integrator;
 pub mod manifold;
@@ -254,7 +253,6 @@ pub fn evaluate(p: &EngineParams, x: &State, u: &Inputs) -> Outputs {
 
     Outputs {
         t_intake,
-        compressor_ratio: comp.pressure_ratio,
         w_compressor: comp.mass_flow,
         eta_compressor: comp.efficiency,
         power_compressor: comp.power,
@@ -268,7 +266,6 @@ pub fn evaluate(p: &EngineParams, x: &State, u: &Inputs) -> Outputs {
         lambda,
         lambda_cylinder,
         eta_ig,
-        imep_gross,
         torque_indicated,
         torque_friction,
         torque_pumping,
@@ -276,7 +273,6 @@ pub fn evaluate(p: &EngineParams, x: &State, u: &Inputs) -> Outputs {
         power_brake_w: torque_brake * x.omega_e,
         torque_prop: torque_brake * p.geometry.gearbox_ratio,
         rpm_prop: x.rpm() / p.geometry.gearbox_ratio,
-        t_cylinder_out,
         t_egt,
         t_exhaust,
         w_turbine: turb.mass_flow,
@@ -287,7 +283,6 @@ pub fn evaluate(p: &EngineParams, x: &State, u: &Inputs) -> Outputs {
         heat_to_coolant,
         heat_to_oil,
         p_oil: oil::gallery_pressure(p, x.omega_e, x.t_oil),
-        oil_viscosity: oil::viscosity(p, x.t_oil),
     }
 }
 

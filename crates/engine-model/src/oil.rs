@@ -74,8 +74,12 @@ pub fn temperature_rate(
     rho: f64,
     tas_m_s: f64,
 ) -> f64 {
-    let open = ((t_oil - p.oil.thermostat_open_k) / p.oil.thermostat_band_k).clamp(0.0, 1.0);
-    let admitted = p.oil.bypass_fraction + (1.0 - p.oil.bypass_fraction) * open;
+    let admitted = crate::thermal::thermostat(
+        t_oil,
+        p.oil.thermostat_open_k,
+        p.oil.thermostat_band_k,
+        p.oil.bypass_fraction,
+    );
     let w_air = crate::thermal::ram_air_flow(p, p.oil.cooler_area_m2, rho, tas_m_s) * admitted;
     let rejected = crate::thermal::exchanger_heat(
         p.oil.cooler_effectiveness,

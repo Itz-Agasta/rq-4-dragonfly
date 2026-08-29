@@ -9,12 +9,17 @@
 use crate::{CYLINDERS, EngineParams};
 
 /// Modelled values at one operating point.
+///
+/// Every field here has either a consumer today or a direct analogue in the
+/// telemetry a real engine controller broadcasts. Quantities that are neither, such
+/// as in-cylinder gas temperature before the manifold cools it or the compressor
+/// pressure ratio that is one division away from two fields already present, are
+/// deliberately absent. They are cheap to add when something needs them and they are
+/// noise until then.
 #[derive(Clone, Copy, Debug)]
 pub struct Outputs {
     /// Intake charge temperature after the intercooler, K.
     pub t_intake: f64,
-    /// Compressor pressure ratio.
-    pub compressor_ratio: f64,
     /// Compressor mass flow, kg/s.
     pub w_compressor: f64,
     /// Compressor isentropic efficiency.
@@ -41,8 +46,6 @@ pub struct Outputs {
     pub lambda_cylinder: [f64; CYLINDERS],
     /// Gross indicated efficiency per cylinder.
     pub eta_ig: [f64; CYLINDERS],
-    /// Gross indicated mean effective pressure, Pa.
-    pub imep_gross: f64,
     /// Gross indicated torque, N.m.
     pub torque_indicated: f64,
     /// Friction and accessory torque, N.m.
@@ -57,8 +60,6 @@ pub struct Outputs {
     pub torque_prop: f64,
     /// Propeller speed, rpm.
     pub rpm_prop: f64,
-    /// Temperature of the gas leaving each cylinder, K.
-    pub t_cylinder_out: [f64; CYLINDERS],
     /// Exhaust gas temperature per cylinder as a manifold thermocouple reads it, K.
     /// Cooler than [`Outputs::t_cylinder_out`], which is why the heat-loss term
     /// exists.
@@ -81,8 +82,6 @@ pub struct Outputs {
     pub heat_to_oil: f64,
     /// Oil gallery pressure above ambient, Pa.
     pub p_oil: f64,
-    /// Oil dynamic viscosity, Pa s.
-    pub oil_viscosity: f64,
 }
 
 impl Outputs {
