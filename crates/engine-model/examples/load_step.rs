@@ -31,6 +31,7 @@ fn main() {
         wastegate: 1.0,
         p_amb: amb.p,
         t_amb: amb.t,
+        tas_m_s: 60.0,
         load_torque: 0.0,
     };
 

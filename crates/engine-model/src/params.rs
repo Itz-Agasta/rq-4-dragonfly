@@ -107,6 +107,9 @@ pub struct Cylinder {
     pub eta_sc: f64,
     /// Injected fuel mass per cylinder per cycle at full FADEC command, mg.
     pub u_f_max_mg: f64,
+    /// Per-cylinder injector flow scale. Unity on a healthy engine; this is the
+    /// parameter an injector fault acts on.
+    pub injector_scale: [f64; crate::CYLINDERS],
 }
 
 /// Rubbing and accessory losses.
@@ -206,6 +209,63 @@ pub struct Control {
     pub kp_overspeed: f64,
 }
 
+/// Cylinder head metal nodes.
+#[derive(Clone, Debug, Deserialize)]
+pub struct Thermal {
+    /// Fraction of a cylinder's fuel energy that enters its head metal.
+    pub heat_fraction_to_head: f64,
+    /// Head-to-coolant conductance at the maximum engine speed, W/K.
+    pub head_conductance_w_per_k: f64,
+    /// Thermal capacity of one cylinder head node, J/K.
+    pub head_capacity_j_per_k: f64,
+}
+
+/// Coolant circuit and radiator.
+#[derive(Clone, Debug, Deserialize)]
+pub struct Cooling {
+    /// Radiator frontal area, m^2.
+    pub radiator_area_m2: f64,
+    /// Radiator effectiveness, 0 to 1.
+    pub radiator_effectiveness: f64,
+    /// Fraction of the approaching stream that passes through a core rather than
+    /// spilling around it. Parsons & Harper give 0.3 to 0.7 for ordinary cores.
+    pub air_flow_constant: f64,
+    /// Thermal capacity of the coolant and the metal it is coupled to, J/K.
+    pub coolant_capacity_j_per_k: f64,
+    /// Coolant temperature at which the thermostat starts to open, K.
+    pub thermostat_open_k: f64,
+    /// Temperature span over which it opens fully, K.
+    pub thermostat_band_k: f64,
+    /// Radiator flow admitted with the thermostat shut. Never zero.
+    pub bypass_fraction: f64,
+}
+
+/// Lubrication circuit.
+#[derive(Clone, Debug, Deserialize)]
+pub struct Oil {
+    /// Vogel viscosity coefficients `[a, b, c]` in `a exp(b / (T - c))`.
+    pub vogel: [f64; 3],
+    /// Pump displacement divided by leakage conductance. Only the group is
+    /// identifiable, so it is carried as one number.
+    pub pressure_coefficient: f64,
+    /// Relief valve setting, Pa above ambient.
+    pub relief_pressure_pa: f64,
+    /// Fraction of fuel energy reaching the oil through the piston-cooling jets.
+    pub heat_fraction_from_fuel: f64,
+    /// Thermal capacity of the oil charge and its sump, J/K.
+    pub capacity_j_per_k: f64,
+    /// Oil cooler frontal area, m^2.
+    pub cooler_area_m2: f64,
+    /// Oil cooler effectiveness, 0 to 1.
+    pub cooler_effectiveness: f64,
+    /// Oil temperature at which the cooler thermostat starts to open, K.
+    pub thermostat_open_k: f64,
+    /// Temperature span over which it opens fully, K.
+    pub thermostat_band_k: f64,
+    /// Cooler flow admitted with the thermostat shut.
+    pub bypass_fraction: f64,
+}
+
 /// Operating limits the model refuses to leave.
 #[derive(Clone, Debug, Deserialize)]
 pub struct Limits {
@@ -240,6 +300,12 @@ pub struct EngineParams {
     pub wastegate: Wastegate,
     /// Turbocharger shaft block.
     pub turbocharger: Turbocharger,
+    /// Cylinder head thermal block.
+    pub thermal: Thermal,
+    /// Coolant circuit block.
+    pub cooling: Cooling,
+    /// Lubrication block.
+    pub oil: Oil,
     /// Control set-point block.
     pub control: Control,
     /// Limits block.
@@ -259,7 +325,57 @@ impl EngineParams {
     }
 
     fn validate(&self) -> Result<(), ParamError> {
-        let positive: [(&'static str, f64, &'static str); 26] = [
+        let positive: [(&'static str, f64, &'static str); 36] = [
+            (
+                "thermal.head_conductance_w_per_k",
+                self.thermal.head_conductance_w_per_k,
+                "divides the head balance",
+            ),
+            (
+                "thermal.head_capacity_j_per_k",
+                self.thermal.head_capacity_j_per_k,
+                "divides the head ODE",
+            ),
+            (
+                "cooling.radiator_area_m2",
+                self.cooling.radiator_area_m2,
+                "scales radiator flow",
+            ),
+            (
+                "cooling.coolant_capacity_j_per_k",
+                self.cooling.coolant_capacity_j_per_k,
+                "divides the coolant ODE",
+            ),
+            (
+                "cooling.thermostat_band_k",
+                self.cooling.thermostat_band_k,
+                "divides the thermostat ramp",
+            ),
+            (
+                "oil.pressure_coefficient",
+                self.oil.pressure_coefficient,
+                "scales gallery pressure",
+            ),
+            (
+                "oil.relief_pressure_pa",
+                self.oil.relief_pressure_pa,
+                "caps gallery pressure",
+            ),
+            (
+                "oil.capacity_j_per_k",
+                self.oil.capacity_j_per_k,
+                "divides the oil ODE",
+            ),
+            (
+                "oil.cooler_area_m2",
+                self.oil.cooler_area_m2,
+                "scales oil cooler flow",
+            ),
+            (
+                "oil.thermostat_band_k",
+                self.oil.thermostat_band_k,
+                "divides the thermostat ramp",
+            ),
             (
                 "manifolds.h_loss_w_per_k",
                 self.manifolds.h_loss_w_per_k,
@@ -424,6 +540,14 @@ impl EngineParams {
                              function and the ideal-cycle efficiency imaginary",
                 });
             }
+        }
+        if (self.geometry.n_cyl - crate::CYLINDERS as f64).abs() > f64::EPSILON {
+            return Err(ParamError::NotPhysical {
+                field: "geometry.n_cyl",
+                value: self.geometry.n_cyl,
+                reason: "the per-cylinder channels are fixed-width arrays, so this \
+                         model is four-cylinder; see CYLINDERS",
+            });
         }
         if self.limits.lambda_min < 1.0 {
             return Err(ParamError::NotPhysical {

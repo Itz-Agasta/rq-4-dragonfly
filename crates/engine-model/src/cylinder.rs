@@ -60,10 +60,22 @@ pub fn injected_fuel(p: &EngineParams, fuel_cmd: f64, w_air: f64, omega_e: f64) 
     commanded.min(smoke_limited).max(0.0)
 }
 
-/// Fuel mass flow, kg/s, from injected mass per cylinder per cycle.
+/// Fuel mass flow for **one** cylinder, kg/s, from its injected mass per cycle.
 #[must_use]
 pub fn fuel_flow(p: &EngineParams, u_f_mg: f64, omega_e: f64) -> f64 {
-    u_f_mg * 1e-6 * p.geometry.n_cyl * omega_e.max(0.0) / (2.0 * PI * p.geometry.revs_per_cycle)
+    u_f_mg * 1e-6 * omega_e.max(0.0) / (2.0 * PI * p.geometry.revs_per_cycle)
+}
+
+/// Injected mass per cylinder after the per-cylinder injector scale, mg.
+///
+/// A healthy engine has every scale at unity and every entry equal. A coked or stuck
+/// injector moves one of them, and note that the engine controller does **not**
+/// compensate: a common-rail system without per-cylinder feedback cannot know, so
+/// total fuel and therefore torque fall along with it. That is half of why an
+/// injector fault is visible at all.
+#[must_use]
+pub fn per_cylinder_fuel(p: &EngineParams, u_f_mg: f64) -> [f64; crate::CYLINDERS] {
+    std::array::from_fn(|i| u_f_mg * p.cylinder.injector_scale[i])
 }
 
 /// Excess air ratio. Returns `f64::INFINITY` on zero fuel, which is the physically
@@ -119,10 +131,21 @@ pub fn indicated_efficiency(p: &EngineParams, lambda: f64) -> f64 {
     (eta_cal * eta_ideal).clamp(0.0, 1.0)
 }
 
-/// Gross indicated mean effective pressure, Pa.
+/// Gross indicated mean effective pressure, Pa, summed over the cylinders.
+///
+/// Each cylinder contributes its own heat release at its own efficiency, so a
+/// cylinder running lean contributes less. Summing rather than scaling a mean is
+/// what lets a single-cylinder fault reach brake torque.
 #[must_use]
-pub fn imep_gross(p: &EngineParams, eta_ig: f64, u_f_mg: f64) -> f64 {
-    eta_ig * p.fuel.lhv_j_per_kg * u_f_mg * 1e-6 * p.geometry.n_cyl / p.geometry.displacement_m3
+pub fn imep_gross(
+    p: &EngineParams,
+    eta_ig: &[f64; crate::CYLINDERS],
+    u_f_mg: &[f64; crate::CYLINDERS],
+) -> f64 {
+    let work: f64 = (0..crate::CYLINDERS)
+        .map(|i| eta_ig[i] * u_f_mg[i] * 1e-6)
+        .sum();
+    work * p.fuel.lhv_j_per_kg / p.geometry.displacement_m3
 }
 
 /// Temperature of the gas leaving the cylinders, K.
@@ -204,7 +227,7 @@ mod tests {
         let w_air_thin = 0.05;
         let u_f = injected_fuel(&p, 1.0, w_air_thin, omega(3880.0));
         assert!(u_f < p.cylinder.u_f_max_mg, "expected clipping, got {u_f}");
-        let lam = lambda(&p, w_air_thin, fuel_flow(&p, u_f, omega(3880.0)));
+        let lam = lambda(&p, w_air_thin, 4.0 * fuel_flow(&p, u_f, omega(3880.0)));
         assert!((lam - p.limits.lambda_min).abs() < 1e-9, "lambda {lam}");
     }
 
@@ -215,7 +238,7 @@ mod tests {
         let w_air = air_flow(&p, p.control.map_setpoint_pa, om, 320.0);
         let u_f = injected_fuel(&p, 1.0, w_air, om);
         assert!((u_f - p.cylinder.u_f_max_mg).abs() < 1e-9, "u_f {u_f}");
-        let lam = lambda(&p, w_air, fuel_flow(&p, u_f, om));
+        let lam = lambda(&p, w_air, 4.0 * fuel_flow(&p, u_f, om));
         assert!((1.45..1.65).contains(&lam), "lambda {lam}");
     }
 
@@ -224,12 +247,22 @@ mod tests {
         // The factsheet gives 39 L/h at 100% power. At 800 kg/m3 that is 8.67 g/s.
         let p = engines::ae330();
         let om = omega(3880.0);
-        let w_f = fuel_flow(&p, p.cylinder.u_f_max_mg, om);
+        let w_f = 4.0 * fuel_flow(&p, p.cylinder.u_f_max_mg, om);
         let litres_per_hour = w_f / p.fuel.density_kg_m3 * 3600.0 * 1000.0;
         assert!(
             (litres_per_hour - 39.0).abs() < 2.0,
             "{litres_per_hour} L/h"
         );
+    }
+
+    #[test]
+    fn a_starved_cylinder_lowers_the_summed_indicated_work() {
+        let p = engines::ae330();
+        let eta = [0.39; crate::CYLINDERS];
+        let healthy = [67.4; crate::CYLINDERS];
+        let mut coked = healthy;
+        coked[2] = 55.0;
+        assert!(imep_gross(&p, &eta, &coked) < imep_gross(&p, &eta, &healthy));
     }
 
     #[test]
@@ -276,6 +309,7 @@ mod tests {
         assert!(air_flow(&p, 0.0, 0.0, 320.0).is_finite());
         assert!(injected_fuel(&p, 1.0, 0.0, 0.0).is_finite());
         assert!(fuel_flow(&p, 0.0, 0.0).is_finite());
+        assert!(per_cylinder_fuel(&p, 0.0).iter().all(|v| v.is_finite()));
         assert!(indicated_efficiency(&p, f64::INFINITY).is_finite());
         assert!(exhaust_temperature(&p, 0.0, 0.0, 0.0, 0.0, 320.0).is_finite());
     }

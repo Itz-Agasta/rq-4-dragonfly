@@ -49,10 +49,23 @@ pub mod flow;
 pub mod friction;
 pub mod integrator;
 pub mod manifold;
+pub mod oil;
+pub mod output;
 pub mod params;
+pub mod thermal;
 pub mod turbine;
 
+pub use output::Outputs;
 pub use params::{EngineParams, ParamError};
+
+/// Number of cylinders.
+///
+/// A compile-time constant rather than a parameter because the per-cylinder
+/// channels are fixed-width arrays. Modelling a different cylinder count means
+/// changing this and rebuilding, which is honest: the array width is in the type
+/// system, so nothing can silently disagree about it. Parameter loading rejects a
+/// file whose cylinder count is anything else.
+pub const CYLINDERS: usize = 4;
 
 use std::ops::{Add, Mul};
 
@@ -71,6 +84,12 @@ pub struct State {
     pub omega_e: f64,
     /// Turbocharger shaft speed, rad/s.
     pub omega_tc: f64,
+    /// Cylinder head metal temperature, K, one per cylinder.
+    pub t_cht: [f64; CYLINDERS],
+    /// Coolant temperature, K.
+    pub t_coolant: f64,
+    /// Oil temperature, K.
+    pub t_oil: f64,
 }
 
 impl Add for State {
@@ -81,6 +100,9 @@ impl Add for State {
             p_em: self.p_em + o.p_em,
             omega_e: self.omega_e + o.omega_e,
             omega_tc: self.omega_tc + o.omega_tc,
+            t_cht: std::array::from_fn(|i| self.t_cht[i] + o.t_cht[i]),
+            t_coolant: self.t_coolant + o.t_coolant,
+            t_oil: self.t_oil + o.t_oil,
         }
     }
 }
@@ -93,13 +115,20 @@ impl Mul<f64> for State {
             p_em: self.p_em * k,
             omega_e: self.omega_e * k,
             omega_tc: self.omega_tc * k,
+            t_cht: std::array::from_fn(|i| self.t_cht[i] * k),
+            t_coolant: self.t_coolant * k,
+            t_oil: self.t_oil * k,
         }
     }
 }
 
 impl State {
     /// A plausible starting point: manifolds at ambient, engine at the given speed,
-    /// turbocharger idling.
+    /// turbocharger idling, everything thermal already warm.
+    ///
+    /// Warm rather than cold deliberately. A cold start takes minutes of simulated
+    /// time to settle and almost every use of this is a study of an engine already
+    /// running; [`State::cold`] exists for the cases that are not.
     #[must_use]
     pub fn at_rest(p_amb: f64, rpm: f64) -> Self {
         Self {
@@ -107,6 +136,23 @@ impl State {
             p_em: p_amb,
             omega_e: rpm * std::f64::consts::TAU / 60.0,
             omega_tc: 2000.0,
+            t_cht: [400.0; CYLINDERS],
+            t_coolant: 360.0,
+            t_oil: 355.0,
+        }
+    }
+
+    /// Everything thermal at ambient, for a cold start.
+    #[must_use]
+    pub fn cold(p_amb: f64, t_amb: f64) -> Self {
+        Self {
+            p_im: p_amb,
+            p_em: p_amb,
+            omega_e: 0.0,
+            omega_tc: 300.0,
+            t_cht: [t_amb; CYLINDERS],
+            t_coolant: t_amb,
+            t_oil: t_amb,
         }
     }
 
@@ -137,97 +183,13 @@ pub struct Inputs {
     /// Ambient static temperature, K. Compressor inlet, intercooler sink, and the
     /// reference the exhaust manifold loses heat to.
     pub t_amb: f64,
+    /// True airspeed, m/s. Ram air through the radiator and the oil cooler. True
+    /// rather than indicated because it is mass flow that cools, and the caller
+    /// already knows the density.
+    pub tas_m_s: f64,
     /// Torque absorbed by whatever the crankshaft drives, N.m, referred to the
     /// crankshaft. A constant-speed propeller unit makes this the governor output.
     pub load_torque: f64,
-}
-
-/// Everything the model computes at one operating point.
-///
-/// Deliberately wide. Diagnosis works on the disagreement between a measurement and
-/// the corresponding modelled quantity, so any quantity a sensor might report has to
-/// be available here to be compared against.
-#[derive(Clone, Copy, Debug)]
-pub struct Outputs {
-    /// Intake charge temperature after the intercooler, K.
-    pub t_intake: f64,
-    /// Compressor pressure ratio.
-    pub compressor_ratio: f64,
-    /// Compressor mass flow, kg/s.
-    pub w_compressor: f64,
-    /// Compressor isentropic efficiency.
-    pub eta_compressor: f64,
-    /// Shaft power absorbed by the compressor, W.
-    pub power_compressor: f64,
-    /// Margin to the compressor surge line, in pressure-ratio units.
-    pub surge_margin: f64,
-    /// Volumetric efficiency.
-    pub eta_vol: f64,
-    /// Air mass flow into the cylinders, kg/s.
-    pub w_air: f64,
-    /// Injected fuel per cylinder per cycle after the smoke limit, mg.
-    pub u_f_mg: f64,
-    /// Fuel mass flow, kg/s.
-    pub w_fuel: f64,
-    /// Excess air ratio. Infinite while motoring.
-    pub lambda: f64,
-    /// Gross indicated efficiency.
-    pub eta_ig: f64,
-    /// Gross indicated mean effective pressure, Pa.
-    pub imep_gross: f64,
-    /// Gross indicated torque, N.m.
-    pub torque_indicated: f64,
-    /// Friction and accessory torque, N.m.
-    pub torque_friction: f64,
-    /// Pumping torque, N.m. Negative when boost exceeds back pressure.
-    pub torque_pumping: f64,
-    /// Brake torque at the crankshaft, N.m.
-    pub torque_brake: f64,
-    /// Brake power, W.
-    pub power_brake_w: f64,
-    /// Torque at the propeller flange, N.m.
-    pub torque_prop: f64,
-    /// Propeller speed, rpm.
-    pub rpm_prop: f64,
-    /// Temperature of the gas leaving the cylinders, K.
-    pub t_cylinder_out: f64,
-    /// Temperature of the gas reaching the turbine, K. This is what a manifold
-    /// thermocouple reads, and it is cooler than [`Outputs::t_cylinder_out`].
-    pub t_exhaust: f64,
-    /// Mass flow through the turbine, kg/s.
-    pub w_turbine: f64,
-    /// Mass flow bypassing the turbine, kg/s.
-    pub w_wastegate: f64,
-    /// Turbine blade speed ratio.
-    pub blade_speed_ratio: f64,
-    /// Turbine combined isentropic and mechanical efficiency.
-    pub eta_turbine: f64,
-    /// Shaft power delivered by the turbine, W.
-    pub power_turbine: f64,
-}
-
-impl Outputs {
-    /// Brake specific fuel consumption, g/kWh.
-    ///
-    /// `None` while the engine is motoring, because specific consumption is
-    /// undefined at or below zero output. Returning a sentinel instead would put a
-    /// number on a display that means the opposite of what it appears to.
-    #[must_use]
-    pub fn bsfc_g_per_kwh(&self) -> Option<f64> {
-        (self.power_brake_w > 0.0).then(|| self.w_fuel * 3.6e9 / self.power_brake_w)
-    }
-
-    /// Volumetric fuel flow, litres/hour.
-    #[must_use]
-    pub fn fuel_litres_per_hour(&self, p: &EngineParams) -> f64 {
-        self.w_fuel / p.fuel.density_kg_m3 * 3.6e6
-    }
-
-    /// Boost pressure above ambient, Pa.
-    #[must_use]
-    pub fn boost_pa(&self, p_amb: f64, p_im: f64) -> f64 {
-        p_im - p_amb
-    }
 }
 
 /// Evaluate every algebraic quantity at one state and set of inputs.
@@ -239,21 +201,56 @@ pub fn evaluate(p: &EngineParams, x: &State, u: &Inputs) -> Outputs {
     let eta_vol = cylinder::volumetric_efficiency(p, x.p_im, x.omega_e);
     let w_air = cylinder::air_flow(p, x.p_im, x.omega_e, t_intake);
     let u_f_mg = cylinder::injected_fuel(p, u.fuel_cmd, w_air, x.omega_e);
-    let w_fuel = cylinder::fuel_flow(p, u_f_mg, x.omega_e);
-    let lambda = cylinder::lambda(p, w_air, w_fuel);
 
-    let eta_ig = cylinder::indicated_efficiency(p, lambda);
-    let imep_gross = cylinder::imep_gross(p, eta_ig, u_f_mg);
+    // Per cylinder from here. Air is assumed to distribute evenly; fuel is not,
+    // because the injector scale is the parameter every injection fault acts on.
+    let u_f_cylinder = cylinder::per_cylinder_fuel(p, u_f_mg);
+    let w_air_cylinder = w_air / CYLINDERS as f64;
+    let w_fuel_cylinder: [f64; CYLINDERS] =
+        std::array::from_fn(|i| cylinder::fuel_flow(p, u_f_cylinder[i], x.omega_e));
+    let w_fuel: f64 = w_fuel_cylinder.iter().sum();
+
+    let lambda_cylinder: [f64; CYLINDERS] =
+        std::array::from_fn(|i| cylinder::lambda(p, w_air_cylinder, w_fuel_cylinder[i]));
+    let lambda = cylinder::lambda(p, w_air, w_fuel);
+    let eta_ig: [f64; CYLINDERS] =
+        std::array::from_fn(|i| cylinder::indicated_efficiency(p, lambda_cylinder[i]));
+
+    let imep_gross = cylinder::imep_gross(p, &eta_ig, &u_f_cylinder);
     let torque_indicated = friction::torque_from_mep(p, imep_gross);
     let torque_friction = friction::friction_torque(p, x.omega_e);
     let torque_pumping = friction::pumping_torque(p, x.p_im, x.p_em);
     let torque_brake = torque_indicated - torque_friction - torque_pumping;
 
-    let t_cylinder_out = cylinder::exhaust_temperature(p, w_air, w_fuel, x.p_im, x.p_em, t_intake);
-    let t_exhaust = manifold::exhaust_gas_temperature(p, t_cylinder_out, u.t_amb, w_air + w_fuel);
+    let t_cylinder_out: [f64; CYLINDERS] = std::array::from_fn(|i| {
+        cylinder::exhaust_temperature(
+            p,
+            w_air_cylinder,
+            w_fuel_cylinder[i],
+            x.p_im,
+            x.p_em,
+            t_intake,
+        )
+    });
+    let t_egt: [f64; CYLINDERS] = std::array::from_fn(|i| {
+        manifold::exhaust_gas_temperature(
+            p,
+            t_cylinder_out[i],
+            u.t_amb,
+            w_air_cylinder + w_fuel_cylinder[i],
+        )
+    });
+    // The turbine sees the mixed stream, not any one runner.
+    let t_exhaust = t_egt.iter().sum::<f64>() / CYLINDERS as f64;
 
     let turb = turbine::operate(p, x.omega_tc, x.p_em, u.p_amb, t_exhaust);
     let w_wastegate = turbine::wastegate_flow(p, u.wastegate, x.p_em, u.p_amb, t_exhaust);
+
+    let head_conductance = thermal::head_conductance(p, x.omega_e);
+    let heat_to_coolant: f64 = (0..CYLINDERS)
+        .map(|i| head_conductance * (x.t_cht[i] - x.t_coolant))
+        .sum();
+    let heat_to_oil = oil::heat_into_oil(p, torque_friction * x.omega_e, w_fuel);
 
     Outputs {
         t_intake,
@@ -265,8 +262,11 @@ pub fn evaluate(p: &EngineParams, x: &State, u: &Inputs) -> Outputs {
         eta_vol,
         w_air,
         u_f_mg,
+        u_f_cylinder,
         w_fuel,
+        w_fuel_cylinder,
         lambda,
+        lambda_cylinder,
         eta_ig,
         imep_gross,
         torque_indicated,
@@ -277,12 +277,17 @@ pub fn evaluate(p: &EngineParams, x: &State, u: &Inputs) -> Outputs {
         torque_prop: torque_brake * p.geometry.gearbox_ratio,
         rpm_prop: x.rpm() / p.geometry.gearbox_ratio,
         t_cylinder_out,
+        t_egt,
         t_exhaust,
         w_turbine: turb.mass_flow,
         w_wastegate,
         blade_speed_ratio: turb.blade_speed_ratio,
         eta_turbine: turb.efficiency,
         power_turbine: turb.power,
+        heat_to_coolant,
+        heat_to_oil,
+        p_oil: oil::gallery_pressure(p, x.omega_e, x.t_oil),
+        oil_viscosity: oil::viscosity(p, x.t_oil),
     }
 }
 
@@ -294,6 +299,8 @@ pub fn derivative(p: &EngineParams, x: &State, u: &Inputs) -> State {
     // and a turbocharger that has coasted to a stop must still be able to be spun up
     // by exhaust energy rather than dividing by zero.
     let omega_tc = x.omega_tc.max(p.turbocharger.omega_min);
+    let rho = u.p_amb / (p.gas.r_air * u.t_amb.max(1.0));
+
     State {
         p_im: manifold::intake_pressure_rate(p, o.t_intake, o.w_compressor, o.w_air),
         p_em: manifold::exhaust_pressure_rate(
@@ -305,6 +312,24 @@ pub fn derivative(p: &EngineParams, x: &State, u: &Inputs) -> State {
         omega_e: (o.torque_brake - u.load_torque) / p.geometry.inertia_kg_m2,
         omega_tc: (o.power_turbine - o.power_compressor)
             / (omega_tc * p.turbocharger.inertia_kg_m2),
+        t_cht: std::array::from_fn(|i| {
+            thermal::head_temperature_rate(
+                p,
+                x.t_cht[i],
+                x.t_coolant,
+                o.w_fuel_cylinder[i],
+                x.omega_e,
+            )
+        }),
+        t_coolant: thermal::coolant_temperature_rate(
+            p,
+            o.heat_to_coolant,
+            x.t_coolant,
+            u.t_amb,
+            rho,
+            u.tas_m_s,
+        ),
+        t_oil: oil::temperature_rate(p, x.t_oil, u.t_amb, o.heat_to_oil, rho, u.tas_m_s),
     }
 }
 
@@ -312,8 +337,8 @@ pub fn derivative(p: &EngineParams, x: &State, u: &Inputs) -> State {
 ///
 /// Inputs are held constant across the step, which is the standard zero-order hold
 /// and is exact for a model driven by a digital controller at or above the step
-/// rate. Pressures and speeds are floored afterwards: a manifold pressure cannot go
-/// negative, and a transient that drove one there would otherwise put a negative
+/// rate. Pressures, speeds and temperatures are floored afterwards: none of them can
+/// go negative, and a transient that drove one there would otherwise put a negative
 /// number under a square root on the next step.
 #[must_use]
 pub fn step(p: &EngineParams, x: &State, u: &Inputs, dt: f64) -> State {
@@ -325,6 +350,9 @@ pub fn step(p: &EngineParams, x: &State, u: &Inputs, dt: f64) -> State {
         omega_tc: next
             .omega_tc
             .clamp(p.turbocharger.omega_min, p.turbocharger.omega_max),
+        t_cht: std::array::from_fn(|i| next.t_cht[i].max(1.0)),
+        t_coolant: next.t_coolant.max(1.0),
+        t_oil: next.t_oil.max(1.0),
     }
 }
 
@@ -343,6 +371,7 @@ mod tests {
             wastegate,
             p_amb: a.p,
             t_amb: a.t,
+            tas_m_s: 60.0,
             load_torque: 0.0,
         }
     }
@@ -357,6 +386,7 @@ mod tests {
             p_em: 3.45e5,
             omega_e: omega(3880.0),
             omega_tc: 14_900.0,
+            ..State::at_rest(atmosphere::isa(0.0).p, 3880.0)
         };
         let o = evaluate(&p, &x, &sea_level(1.0, 0.0));
 

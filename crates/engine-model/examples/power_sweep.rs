@@ -10,8 +10,10 @@
 
 use engine_model::{EngineParams, Inputs, State, atmosphere, control, engines, integrator};
 
-/// Simulated seconds allowed for each speed to settle.
-const SETTLE_S: f64 = 25.0;
+/// Simulated seconds allowed for each speed to settle. Long, because the coolant
+/// and oil nodes have thermal time constants of a minute or more; the gas path
+/// alone would be settled in a fraction of a second.
+const SETTLE_S: f64 = 400.0;
 
 fn main() {
     let p: EngineParams = engines::ae330();
@@ -20,7 +22,8 @@ fn main() {
     println!(
         "rpm,rpm_prop,map_bar,boost_bar,pem_bar,t_im_k,turbo_rpm,wastegate,eta_vol,\
          w_air_kgs,lambda,eta_ig,torque_nm,torque_prop_nm,power_kw,power_hp,\
-         egt_k,eta_c,eta_t,surge_margin,fuel_lph,bsfc_gkwh"
+         egt_k,eta_c,eta_t,surge_margin,fuel_lph,bsfc_gkwh,\
+         cht_k,coolant_k,oil_k,oil_bar"
     );
 
     let mut best = (0.0, 0.0);
@@ -33,6 +36,7 @@ fn main() {
             wastegate: 1.0,
             p_amb: amb.p,
             t_amb: amb.t,
+            tas_m_s: 60.0,
             load_torque: 0.0,
         };
 
@@ -53,10 +57,10 @@ fn main() {
 
         println!(
             "{rpm:.0},{:.0},{:.4},{:.4},{:.4},{:.1},{:.0},{:.4},{:.4},{:.5},{:.3},{:.4},\
-             {:.2},{:.2},{:.3},{:.1},{:.1},{:.4},{:.4},{:.3},{:.2},{:.1}",
+             {:.2},{:.2},{:.3},{:.1},{:.1},{:.4},{:.4},{:.3},{:.2},{:.1},{:.1},{:.1},{:.1},{:.3}",
             o.rpm_prop,
             x.p_im / 1e5,
-            o.boost_pa(amb.p, x.p_im) / 1e5,
+            (x.p_im - amb.p) / 1e5,
             x.p_em / 1e5,
             o.t_intake,
             x.turbo_rpm(),
@@ -64,7 +68,7 @@ fn main() {
             o.eta_vol,
             o.w_air,
             o.lambda,
-            o.eta_ig,
+            o.eta_ig_mean(),
             o.torque_brake,
             o.torque_prop,
             power_kw,
@@ -75,6 +79,10 @@ fn main() {
             o.surge_margin,
             o.fuel_litres_per_hour(&p),
             o.bsfc_g_per_kwh().unwrap_or(0.0),
+            x.t_cht[0],
+            x.t_coolant,
+            x.t_oil,
+            o.p_oil / 1e5,
         );
         rpm += 20.0;
     }

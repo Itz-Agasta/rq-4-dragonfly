@@ -85,15 +85,23 @@ eta_ig_island = [0.45, 0.760, 0.55] # estimated
 # Ekberg, Leek & Eriksson, SIMS 59, 2018, eq. 17d.
 gamma_cyl = [1.35, -0.15] # estimated
 
-# Scaling on the cylinder-out gas temperature. Unity because there is no exhaust
-# temperature measurement to fit it against; the cited work fits 1.2563 for a
-# heavy-duty engine at much lower speeds.
-eta_sc = 1.00 # estimated
+# Scaling on the cylinder-out gas temperature. Fitted so that exhaust temperature at
+# the take-off rating lands in the 700 to 850 C band a turbocharged diesel actually
+# runs at ahead of the turbine; at unity the model was 150 K cooler than that. It
+# lands next to the 1.2563 the cited work fits on a heavy-duty engine, which is
+# reassuring but not the reason.
+eta_sc = 1.21 # estimated
 
 # Injected fuel mass per cylinder per cycle at full FADEC command. Fitted so that
 # full command at the take-off speed reproduces the published power, torque and
 # fuel consumption simultaneously.
 u_f_max_mg = 67.4 # estimated
+
+# Per-cylinder injector flow scale, unity on a healthy engine. Present so that
+# per-cylinder exhaust and head temperatures exist at all: with four identical
+# scales the cylinders are identical, which is what a healthy engine looks like,
+# and an injector fault is a departure of one of them from unity.
+injector_scale = [1.0, 1.0, 1.0, 1.0] # estimated
 
 [friction]
 # Friction mean effective pressure in bar as a quadratic in crank speed in
@@ -140,12 +148,11 @@ c_flow = [0.6666, 5.3517] # estimated
 
 [turbocharger]
 # Rotor inertia. No figure is published for this turbocharger. A modelled diesel
-# compressor wheel is 6e-5 kg m2 (Mishra & Saad 2017) and a 6.7 litre engine's turbo
-# is 1.87e-4 (Sivertsson & Eriksson 2014); scaling the latter by displacement gives
-# 2.5e-5, which is the value used. It is corroborated rather than chosen: at twice
-# this figure the modelled spool is 4.2 s, and turbochargers of this size are
-# measured at 1 to 2 s.
-inertia_kg_m2 = 2.5e-5 # estimated
+# compressor wheel is 6e-5 kg m2 (Mishra & Saad 2017); scaling a 6.7 litre engine's
+# turbocharger by displacement (Sivertsson & Eriksson 2014) gives 2.5e-5. This sits
+# between the two, and it is corroborated rather than chosen: it puts the modelled
+# spool at 1.5 s, and turbochargers of this size are measured at 1 to 2 s.
+inertia_kg_m2 = 5.0e-5 # estimated
 omega_max = 18640.0 # published, 178,000 rpm demonstrated containment
 omega_min = 300.0 # estimated, floor so the shaft power balance stays finite
 
@@ -162,7 +169,60 @@ integral_limit = 5.0e6 # estimated, anti-windup clamp
 # Turbocharger overspeed supervision. Held at 95% of the certified containment
 # speed, because containment is what the rotor survives once, not what it runs at.
 turbo_omega_limit = 17700.0 # estimated, 169,000 rpm
-kp_overspeed = 2.0e-3 # estimated
+kp_overspeed = 5.0e-3 # estimated
+
+[thermal]
+# Heat entering the head metal as a fraction of that cylinder's fuel energy. A
+# common-rail diesel's energy balance is roughly 40% brake, 30% exhaust, 25%
+# coolant, the rest oil and radiation; this is the coolant share.
+heat_fraction_to_head = 0.25 # estimated
+# Head-to-coolant conductance at the maximum engine speed. Sized so the head runs
+# about 51 K above coolant at the canonical cruise point.
+head_conductance_w_per_k = 199.0 # estimated
+# About 3 kg of aluminium head per cylinder, which gives a 15 second thermal time
+# constant. That is what makes a head temperature lag a fuelling change.
+head_capacity_j_per_k = 2700.0 # estimated
+
+[cooling]
+# Radiator sized for the binding case, which for a liquid-cooled engine whose power
+# lapses above 11,000 ft is a hot day at low altitude and low airspeed at full
+# power, not high altitude. See the note in thermal.rs.
+radiator_area_m2 = 0.110 # estimated
+radiator_effectiveness = 0.70 # estimated
+# Fraction of the approaching stream that passes through the core rather than
+# spilling around it. Parsons & Harper, NBS Technical Paper 211, give 0.3 to 0.7
+# for ordinary cores and note that a bare radiator in a free stream passes less
+# than a third.
+air_flow_constant = 0.50 # published range, value estimated within it
+# Coolant charge plus the block metal it is closely coupled to, giving a thermal
+# time constant of about a minute.
+coolant_capacity_j_per_k = 60000.0 # estimated
+# Without a thermostat the coolant would settle far below its working temperature
+# at altitude, where the radiator has far more capacity than the engine needs.
+thermostat_open_k = 356.0 # estimated
+thermostat_band_k = 12.0 # estimated
+bypass_fraction = 0.05 # estimated, the radiator is never fully isolated
+
+[oil]
+# Vogel coefficients fitted to a 15W-50 aviation multigrade: 0.096 Pa s at 40 C
+# and 0.0157 Pa s at 100 C, with the pole fixed at 160 K as is conventional.
+vogel = [1.545e-4, 985.0, 160.0] # estimated
+# Pump displacement over leakage conductance. Sized to give 4.2 bar at 3720 rpm
+# with the oil at 358 K. Only the group is identifiable without stripping the
+# engine, which is why it is one number and not two.
+pressure_coefficient = 48234.0 # estimated
+relief_pressure_pa = 5.5e5 # estimated
+# Piston-cooling jets carry combustion heat out of the piston crowns into the oil.
+heat_fraction_from_fuel = 0.04 # estimated
+capacity_j_per_k = 15000.0 # estimated, about 6 litres plus the sump
+# The oil rejects to ram air through its own cooler rather than to the coolant.
+# That is the aviation arrangement and it is also the only way oil can run cooler
+# than coolant, which is what the operating data shows.
+cooler_area_m2 = 0.028 # estimated
+cooler_effectiveness = 0.65 # estimated
+thermostat_open_k = 350.0 # estimated
+thermostat_band_k = 12.0 # estimated
+bypass_fraction = 0.08 # estimated
 
 [limits]
 rpm_max = 4220.0 # published, maximum engine overspeed

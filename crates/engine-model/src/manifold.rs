@@ -22,7 +22,7 @@ pub fn exhaust_pressure_rate(p: &EngineParams, t_em: f64, w_in: f64, w_out: f64)
     p.gas.r_exh * t_em / p.manifolds.v_em_m3 * (w_in - w_out)
 }
 
-/// Temperature of the gas reaching the turbine, K.
+/// Temperature of the gas leaving **one** exhaust runner, K.
 ///
 /// Exhaust gas cools between the port and the turbine inlet, and how much it cools
 /// depends on how fast it is moving: a slow-flowing exhaust spends longer in contact
@@ -34,6 +34,11 @@ pub fn exhaust_pressure_rate(p: &EngineParams, t_em: f64, w_in: f64, w_out: f64)
 /// port, so without this term every modelled exhaust temperature carries a bias of
 /// 50 to 150 K against its measurement, and a twin would have to absorb that
 /// somewhere dishonest.
+///
+/// Per runner, and the conductance is divided accordingly. Applying the whole
+/// manifold's conductance to one runner's flow would quadruple the exponent and
+/// overcool every cylinder, because the exponent is a ratio of the two and both
+/// scale together.
 ///
 /// Eriksson, "Mean value models for exhaust system temperatures", SAE 2002-01-0374.
 #[must_use]
@@ -47,7 +52,8 @@ pub fn exhaust_gas_temperature(
     if thermal_flow <= 0.0 {
         return t_amb;
     }
-    t_amb + (t_cylinder_out - t_amb) * (-p.manifolds.h_loss_w_per_k / thermal_flow).exp()
+    let conductance = p.manifolds.h_loss_w_per_k / crate::CYLINDERS as f64;
+    t_amb + (t_cylinder_out - t_amb) * (-conductance / thermal_flow).exp()
 }
 
 #[cfg(test)]
@@ -77,8 +83,9 @@ mod tests {
     #[test]
     fn exhaust_cools_more_at_low_flow_than_at_high_flow() {
         let p = engines::ae330();
-        let fast = exhaust_gas_temperature(&p, 915.0, 288.0, 0.21);
-        let slow = exhaust_gas_temperature(&p, 915.0, 288.0, 0.04);
+        // Per runner, so a quarter of the engine's total exhaust flow.
+        let fast = exhaust_gas_temperature(&p, 915.0, 288.0, 0.21 / 4.0);
+        let slow = exhaust_gas_temperature(&p, 915.0, 288.0, 0.04 / 4.0);
         assert!(slow < fast, "{slow} should be below {fast}");
         assert!(fast < 915.0 && fast > 288.0);
         // At the rating point the drop should be tens of kelvin, not hundreds.
@@ -93,5 +100,6 @@ mod tests {
     fn no_flow_means_the_manifold_sits_at_ambient() {
         let p = engines::ae330();
         assert!((exhaust_gas_temperature(&p, 915.0, 288.0, 0.0) - 288.0).abs() < 1e-12);
+        assert!(exhaust_gas_temperature(&p, 915.0, 288.0, -1.0).is_finite());
     }
 }
