@@ -272,16 +272,31 @@ mod tests {
         assert!((0.36..0.44).contains(&eta), "eta_ig {eta}");
     }
 
+    /// The signature every injection fault is diagnosed by, and its direction is
+    /// the opposite of the spark-ignition intuition.
+    ///
+    /// On a spark-ignition engine the mixture sits near stoichiometric and peak
+    /// exhaust temperature lies just lean of it, so leaning from rich runs the
+    /// cylinder hotter. A compression-ignition engine runs between about 1.3 and
+    /// 5 excess air, which is far lean of any peak: heat release falls
+    /// monotonically with fuel from there, and so does exhaust temperature.
+    ///
+    /// So a coked injector, which delivers less fuel than commanded, makes its
+    /// cylinder **cooler** than its neighbours. Getting this backwards would make
+    /// the whole fault library look for the wrong sign.
     #[test]
-    fn leaning_a_cylinder_raises_its_exhaust_temperature() {
-        // The signature every injector fault is diagnosed by: at constant air flow,
-        // less fuel means a hotter, not cooler, exhaust, because the ratio of
-        // specific heats rises faster than the heat release falls.
+    fn leaning_a_cylinder_lowers_its_exhaust_temperature() {
         let p = engines::ae330();
-        let hot = exhaust_temperature(&p, 0.20, 0.0080, 3.1e5, 3.45e5, 320.0);
-        let hotter = exhaust_temperature(&p, 0.20, 0.0088, 3.1e5, 3.45e5, 320.0);
-        assert!(hotter > hot);
-        assert!((700.0..1100.0).contains(&hot), "T_e {hot}");
+        let nominal = exhaust_temperature(&p, 0.20, 0.0088, 3.1e5, 3.45e5, 320.0);
+        let coked = exhaust_temperature(&p, 0.20, 0.0088 * 0.84, 3.1e5, 3.45e5, 320.0);
+        assert!(
+            coked < nominal,
+            "coked {coked} should be cooler than nominal {nominal}"
+        );
+        // 700 to 1150 K is the cylinder-out band a turbocharged diesel runs at
+        // before the exhaust manifold cools the gas on its way to the turbine.
+        assert!((700.0..1150.0).contains(&nominal), "T_e {nominal}");
+        assert!((700.0..1150.0).contains(&coked), "T_e coked {coked}");
     }
 
     #[test]

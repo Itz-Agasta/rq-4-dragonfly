@@ -1,3 +1,7 @@
+/* Geist Mono, self-hosted. An air-gapped ground station has no CDN, and the
+   font is the whole product's voice: falling back to a system mono changes
+   every glyph width and breaks the tabular alignment the readouts depend on. */
+@import "@fontsource-variable/geist-mono";
 @import "tailwindcss";
 
 @custom-variant dark (&:is(.dark *));
@@ -68,9 +72,11 @@
   /* --- type ------------------------------------------------------------ */
   /* one mono stack for everything. --font-sans aliases it so shadcn can't
      break the look by reaching for the "sans" token. */
-  --font-mono: Geist Mono, JetBrains Mono, SFMono-Regular, Roboto Mono, monospace;
-  --font-sans: Geist Mono, JetBrains Mono, SFMono-Regular, Roboto Mono, monospace;
-  --font-serif: Geist Mono, JetBrains Mono, monospace;
+  --font-mono:
+    Geist Mono Variable, Geist Mono, JetBrains Mono, SFMono-Regular, Roboto Mono, monospace;
+  --font-sans:
+    Geist Mono Variable, Geist Mono, JetBrains Mono, SFMono-Regular, Roboto Mono, monospace;
+  --font-serif: Geist Mono Variable, Geist Mono, JetBrains Mono, monospace;
   --tracking-normal: -0.01em;
   --tracking-label: 0.08em;
 
@@ -91,6 +97,14 @@
 
 .dark {
   color-scheme: dark;
+  --sidebar: hsl(240 5.9% 10%);
+  --sidebar-foreground: hsl(240 4.8% 95.9%);
+  --sidebar-primary: hsl(224.3 76.3% 48%);
+  --sidebar-primary-foreground: hsl(0 0% 100%);
+  --sidebar-accent: hsl(240 3.7% 15.9%);
+  --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
+  --sidebar-border: hsl(240 3.7% 15.9%);
+  --sidebar-ring: hsl(217.2 91.2% 59.8%);
 }
 
 @theme inline {
@@ -195,6 +209,17 @@
     font-feature-settings:
       "tnum" 1,
       "zero" 1;
+  }
+
+  /* Live-value states. Set from the render loop as attributes rather than
+     classes, because a class change would mean a React render at 20 Hz.
+     Stale outranks alarm: a threshold crossed by a value that stopped updating
+     is not a measurement, so it must not be allowed to paint the accent. */
+  [data-stale] {
+    opacity: 0.42;
+  }
+  [data-alarm]:not([data-stale]) {
+    color: var(--primary);
   }
 
   /* 10px uppercase labels, labels only */
