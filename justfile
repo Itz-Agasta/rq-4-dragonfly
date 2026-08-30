@@ -64,6 +64,12 @@ kiosk:
 candump:
     candump vcan0
 
+# prove decoded telemetry reaches a websocket client. the D6 acceptance test.
+# uses uv rather than websocat, which is not installed and would be one more
+# thing to get onto the demo machine.
+probe frames="20":
+    uv run --quiet --with websockets --with msgpack python scripts/ws_probe.py {{frames}}
+
 # regenerate the dronecan-ice golden vectors from the reference implementation.
 # run this when the message set changes, never in CI. python stays offline.
 golden:
