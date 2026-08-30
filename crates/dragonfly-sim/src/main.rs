@@ -15,6 +15,7 @@
 //! same bytes on the bus, which is what makes a recorded mission replayable and
 //! a reported problem reproducible.
 
+mod fault;
 mod mission;
 mod plant;
 mod publish;
@@ -28,6 +29,7 @@ use dronecan_ice::{AuxiliaryStatus, Message};
 use socketcan::{EmbeddedFrame, ExtendedId, tokio::CanSocket};
 use tokio::time::{MissedTickBehavior, interval};
 
+use fault::InjectorCoking;
 use mission::Profile;
 use plant::Plant;
 use publish::Publisher;
@@ -63,6 +65,22 @@ struct Args {
     /// Stop after this many simulated seconds. Runs forever if unset.
     #[arg(long)]
     duration: Option<f64>,
+
+    /// Cylinder to coke the injector on, 1 to 4. Healthy if unset.
+    #[arg(long, value_parser = clap::value_parser!(u8).range(1..=4))]
+    fault_cylinder: Option<u8>,
+
+    /// Simulated seconds before the injector fault begins.
+    #[arg(long, default_value_t = 90.0)]
+    fault_onset: f64,
+
+    /// Simulated seconds the fault takes to reach its settled severity.
+    #[arg(long, default_value_t = 240.0)]
+    fault_ramp: f64,
+
+    /// Injector flow scale the fault settles at, as a fraction of nominal.
+    #[arg(long, default_value_t = 0.84)]
+    fault_scale: f64,
 }
 
 #[tokio::main]
@@ -83,6 +101,12 @@ async fn main() -> Result<()> {
     let mut condition = args.profile.condition_at(0.0);
     let mut plant = Plant::new(params, &condition);
     let mut sensors = Sensors::new(args.seed);
+    let injector_fault = args.fault_cylinder.map(|c| InjectorCoking {
+        cylinder: usize::from(c - 1),
+        onset_s: args.fault_onset,
+        ramp_s: args.fault_ramp,
+        final_scale: args.fault_scale,
+    });
     let mut publisher = Publisher::new(args.aux_dtid);
 
     tracing::info!(
@@ -91,6 +115,7 @@ async fn main() -> Result<()> {
         profile = ?args.profile,
         speed = args.speed,
         seed = args.seed,
+        fault = ?injector_fault.map(|f| (f.cylinder + 1, f.onset_s, f.final_scale)),
         "publishing at {PUBLISH_HZ} Hz"
     );
 
@@ -116,6 +141,11 @@ async fn main() -> Result<()> {
         }
 
         condition = args.profile.condition_at(t_s);
+        // Applied before the step, so the engine integrates with the degraded
+        // parameter rather than one step behind it.
+        if let Some(f) = injector_fault {
+            plant.params.cylinder.injector_scale[f.cylinder] = f.scale_at(t_s);
+        }
         let outputs = plant.advance(&condition, dt);
         let reading = sensors.sample(&plant.state, &outputs, dt);
 
