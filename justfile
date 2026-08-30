@@ -64,6 +64,13 @@ kiosk:
 candump:
     candump vcan0
 
+# regenerate the dronecan-ice golden vectors from the reference implementation.
+# run this when the message set changes, never in CI. python stays offline.
+golden:
+    uv run --quiet --with dronecan python scripts/golden_vectors.py \
+        > crates/dronecan-ice/tests/vectors/golden.rs
+    cargo test -p dronecan-ice --test vectors
+
 # the D4 physics gate. regenerates docs/model_validation.md.
 validate:
     cargo run -p engine-model --example validation_sweep
