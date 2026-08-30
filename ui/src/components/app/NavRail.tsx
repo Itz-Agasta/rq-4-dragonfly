@@ -25,7 +25,7 @@
 import { useEffect } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router";
 
-import { AboutGlyph, SCREEN_GLYPHS, SettingsGlyph } from "@/components/app/glyphs";
+import { AboutGlyph, Mark, SCREEN_GLYPHS, SettingsGlyph } from "@/components/app/glyphs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type ScreenId, SCREENS, screenHasUnacknowledged, useApp } from "@/store/app";
 
@@ -151,10 +151,9 @@ export function NavRail() {
 
   return (
     <nav className="border-border flex w-12 shrink-0 flex-col border-r" aria-label="Screens">
-      <div className="border-border flex h-10 items-center justify-center border-b">
-        <span className="text-foreground text-[12px] leading-none font-medium tracking-[0.06em]">
-          DF
-        </span>
+      <div className="border-border text-foreground flex h-10 items-center justify-center border-b">
+        <Mark size={22} />
+        <span className="sr-only">RQ-4 DRAGONFLY</span>
       </div>
 
       {SCREENS.map((id, i) => (

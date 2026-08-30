@@ -16,12 +16,20 @@ interface GlyphProps {
   className?: string;
 }
 
-function Frame({ children, className }: { children: React.ReactNode; className?: string }) {
+function Frame({
+  children,
+  className,
+  size = 20,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  size?: number;
+}) {
   return (
     <svg
       viewBox="0 0 20 20"
-      width="20"
-      height="20"
+      width={size}
+      height={size}
       fill="none"
       stroke="currentColor"
       strokeWidth="1.5"
@@ -32,6 +40,36 @@ function Frame({ children, className }: { children: React.ReactNode; className?:
     >
       {children}
     </svg>
+  );
+}
+
+/**
+ * The product mark: a dragonfly in plan, which is also an inline-4 on its crank
+ * axis. Spine is the crank, the four wings are the four cylinders.
+ *
+ * Each wing *pair* is one continuous stroke through the body rather than two
+ * wings meeting it, and nothing here is dashed. Four separate wings, a head dot
+ * and a dashed twin-edge were all drawn and all dissolve below 24px, which is
+ * the only size that matters: the rail cell and the 16px favicon. The head dot
+ * additionally made it read as a stick figure.
+ *
+ * **The hind pair is wider than the fore pair on purpose.** A wide-top,
+ * narrow-bottom silhouette is an arrowhead, and every symmetric or fore-wide
+ * variant read as an arrow or an asterisk instead of an insect. Do not
+ * "correct" the asymmetry.
+ *
+ * Stays `currentColor`, and the rail renders it in the foreground grey, not the
+ * accent: a permanently orange element in the chrome competes with a real alarm
+ * for the one colour that means attention. The favicon is the exception and
+ * takes the accent, because a browser tab has no alarm semantics to protect.
+ */
+function Mark({ className, size }: GlyphProps & { size?: number }) {
+  return (
+    <Frame className={className} size={size}>
+      <path d="M10 2.2V17.9" />
+      <path d="M3 4.9 10 7.1 17 4.9" />
+      <path d="M2.2 13.1 10 10.3 17.8 13.1" />
+    </Frame>
   );
 }
 
@@ -125,4 +163,4 @@ export const SCREEN_GLYPHS: Record<ScreenId, (props: GlyphProps) => React.ReactE
   fleet: FleetGlyph,
 };
 
-export { AboutGlyph, SettingsGlyph };
+export { AboutGlyph, Mark, SettingsGlyph };
