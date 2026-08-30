@@ -424,7 +424,7 @@ mod tests {
         let mut u = sea_level(1.0, 1.0);
 
         for _ in 0..(20.0 / integrator::DT) as u32 {
-            u.wastegate = boost.update(&p, x.p_im, x.omega_tc, integrator::DT);
+            u.wastegate = boost.update(&p, u.fuel_cmd, x.p_im, x.omega_tc, integrator::DT);
             // Perfect governor: the propeller absorbs exactly what the engine makes,
             // which is what holds crank speed while the turbocharger finds its own.
             u.load_torque = evaluate(&p, &x, &u).torque_brake;
@@ -455,7 +455,7 @@ mod tests {
             if i == 1000 {
                 u.fuel_cmd = 1.0;
             }
-            u.wastegate = boost.update(&p, x.p_im, x.omega_tc, integrator::DT);
+            u.wastegate = boost.update(&p, u.fuel_cmd, x.p_im, x.omega_tc, integrator::DT);
             u.load_torque = evaluate(&p, &x, &u).torque_brake;
             x = step(&p, &x, &u, integrator::DT);
             assert!(

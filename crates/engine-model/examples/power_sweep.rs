@@ -41,7 +41,7 @@ fn main() {
         };
 
         for _ in 0..(SETTLE_S / integrator::DT) as u32 {
-            u.wastegate = boost.update(&p, x.p_im, x.omega_tc, integrator::DT);
+            u.wastegate = boost.update(&p, u.fuel_cmd, x.p_im, x.omega_tc, integrator::DT);
             let o = engine_model::evaluate(&p, &x, &u);
             // Perfect governor: the propeller takes exactly what the engine makes, so
             // crank speed is held while the turbocharger finds its own equilibrium.

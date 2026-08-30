@@ -47,7 +47,7 @@ fn main() {
         if t >= STEP_AT {
             u.fuel_cmd = 1.0;
         }
-        u.wastegate = boost.update(&p, x.p_im, x.omega_tc, integrator::DT);
+        u.wastegate = boost.update(&p, u.fuel_cmd, x.p_im, x.omega_tc, integrator::DT);
         let o = engine_model::evaluate(&p, &x, &u);
         u.load_torque = o.torque_brake;
         if i % 10 == 0 {

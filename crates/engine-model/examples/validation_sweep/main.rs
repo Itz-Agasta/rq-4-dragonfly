@@ -52,7 +52,7 @@ fn settle(
     let steps = (SETTLE_MAX_S / integrator::DT) as u32;
     let mut previous = x;
     for i in 0..steps {
-        u.wastegate = boost.update(p, x.p_im, x.omega_tc, integrator::DT);
+        u.wastegate = boost.update(p, u.fuel_cmd, x.p_im, x.omega_tc, integrator::DT);
         u.load_torque = engine_model::evaluate(p, &x, &u).torque_brake;
         x = engine_model::step(p, &x, &u, integrator::DT);
         if i % 200 == 199 {
@@ -217,7 +217,7 @@ fn main() -> std::io::Result<()> {
         if t >= step_at {
             u.fuel_cmd = 1.0;
         }
-        u.wastegate = boost.update(&p, x.p_im, x.omega_tc, integrator::DT);
+        u.wastegate = boost.update(&p, u.fuel_cmd, x.p_im, x.omega_tc, integrator::DT);
         u.load_torque = engine_model::evaluate(&p, &x, &u).torque_brake;
         // Decimated to 20 Hz. The integrator runs at 200 Hz and every one of those
         // points in the figure would be four times the file for no visible detail.

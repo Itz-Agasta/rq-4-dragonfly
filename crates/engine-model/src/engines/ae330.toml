@@ -159,7 +159,8 @@ omega_min = 300.0 # estimated, floor so the shaft power balance stays finite
 [control]
 # The boost pressure the FADEC holds. At the rating point this gives an excess air
 # ratio of about 1.55, comfortably clear of the smoke limit.
-map_setpoint_pa = 3.10e5 # estimated
+map_setpoint_pa = 3.10e5 # estimated, at full fuelling
+map_setpoint_zero_pa = 0.20e5 # estimated, the schedule extrapolated to zero fuelling
 # Gains are per pascal of error, so they look small. Sized for a loop an order of
 # magnitude slower than the turbocharger shaft, because a boost controller faster
 # than its actuator chatters against the wastegate stops.

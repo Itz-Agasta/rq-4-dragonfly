@@ -192,10 +192,21 @@ pub struct Turbocharger {
 /// Engine control set-points.
 #[derive(Clone, Debug, Deserialize)]
 pub struct Control {
-    /// Intake manifold pressure the boost controller holds, Pa. Below the critical
-    /// altitude the wastegate modulates to maintain it; above, it cannot be reached
-    /// and power falls away. That inflection is the critical altitude.
+    /// Intake manifold pressure the boost controller holds at **full** fuelling, Pa.
+    /// Below the critical altitude the wastegate modulates to maintain it; above, it
+    /// cannot be reached and power falls away. That inflection is the critical altitude.
     pub map_setpoint_pa: f64,
+    /// The boost schedule extrapolated to **zero** fuelling, Pa.
+    ///
+    /// The set point is linear in fuelling demand between this and
+    /// [`Control::map_setpoint_pa`]. A production controller uses a two-dimensional
+    /// map fitted on a dynamometer; this is that map reduced to its dominant axis.
+    ///
+    /// It sits **below any ambient pressure on purpose**. That is what makes the
+    /// controller demand no boost at all at low fuelling and hold the wastegate open,
+    /// which is what a turbocharged diesel does at idle. Treating it as a pressure the
+    /// engine ever runs at is a misreading; it is the intercept of a line.
+    pub map_setpoint_zero_pa: f64,
     /// Boost controller proportional gain, wastegate command per Pa of error.
     pub kp: f64,
     /// Boost controller integral gain, wastegate command per Pa-second of error.
@@ -549,6 +560,14 @@ impl EngineParams {
                          model is four-cylinder; see CYLINDERS",
             });
         }
+        if self.control.map_setpoint_zero_pa >= self.control.map_setpoint_pa {
+            return Err(ParamError::NotPhysical {
+                field: "control.map_setpoint_zero_pa",
+                value: self.control.map_setpoint_zero_pa,
+                reason: "the boost schedule would run backwards, so more fuel would \
+                         demand less air",
+            });
+        }
         if self.limits.lambda_min < 1.0 {
             return Err(ParamError::NotPhysical {
                 field: "limits.lambda_min",
@@ -577,6 +596,18 @@ impl EngineParams {
 #[cfg(test)]
 mod tests {
     use crate::engines;
+
+    /// The schedule must slope the right way. Inverted, the controller would
+    /// quietly demand less air for more fuel, which shows up as a smoke-limited
+    /// engine rather than as a parameter error.
+    #[test]
+    fn an_inverted_boost_schedule_is_rejected() {
+        let toml = engines::AE330_TOML.replace(
+            "map_setpoint_zero_pa = 0.20e5",
+            "map_setpoint_zero_pa = 4.0e5",
+        );
+        assert!(crate::EngineParams::from_toml(&toml).is_err());
+    }
 
     #[test]
     fn the_shipped_engine_validates() {
