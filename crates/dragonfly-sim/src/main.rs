@@ -7,8 +7,8 @@
 //!
 //! Faults are physically grounded parameter perturbations inside `engine-model`,
 //! never signal-level hacks. That is what makes residual-based diagnosis actually
-//! work instead of merely appearing to. None are injectable yet;
-//! `cylinder.injector_scale` is the parameter the first of them will act on.
+//! work instead of merely appearing to. Injector coking acts on
+//! `cylinder.injector_scale`; see `fault`.
 //!
 //! The whole run is a function of the seed and the profile. Nothing reads the
 //! wall clock except the pacing, so two runs with the same arguments put the
@@ -23,7 +23,7 @@ mod sensors;
 
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use clap::Parser;
 use dronecan_ice::{AuxiliaryStatus, Message};
 use socketcan::{EmbeddedFrame, ExtendedId, tokio::CanSocket};
@@ -83,6 +83,36 @@ struct Args {
     fault_scale: f64,
 }
 
+/// Reject fault arguments the injector model cannot honour.
+///
+/// clap has ranged parsers for integers only, and these are the arguments that
+/// otherwise fail quietly rather than loudly: a negative ramp clamps the growth
+/// to zero and a scale of 1.0 or more never removes any fuel, so either one
+/// publishes a healthy engine for a run whose command line says a fault was
+/// injected. Non-finite values are worse still, propagating through the state
+/// integration until every channel on the bus is NaN.
+fn validate_fault(args: &Args) -> Result<()> {
+    if args.fault_cylinder.is_none() {
+        return Ok(());
+    }
+    ensure!(
+        args.fault_onset.is_finite() && args.fault_onset >= 0.0,
+        "--fault-onset is a simulated time in seconds, so it must be finite and not negative, got {}",
+        args.fault_onset
+    );
+    ensure!(
+        args.fault_ramp.is_finite() && args.fault_ramp >= 0.0,
+        "--fault-ramp is a duration in seconds, so it must be finite and not negative, got {}. Use 0 for a step change.",
+        args.fault_ramp
+    );
+    ensure!(
+        args.fault_scale.is_finite() && (0.0..1.0).contains(&args.fault_scale),
+        "--fault-scale is the fraction of nominal injector flow the fault settles at, so it must be in 0.0 to 1.0 and below nominal to be a fault at all, got {}",
+        args.fault_scale
+    );
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -93,6 +123,7 @@ async fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
+    validate_fault(&args)?;
     let socket = CanSocket::open(&args.iface)
         .with_context(|| format!("opening CAN interface {}, is `just can` done?", args.iface))?;
 
@@ -179,5 +210,48 @@ async fn main() -> Result<()> {
             tracing::info!(frames = published, "profile complete");
             return Ok(());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `try_parse_from`, not `parse_from`: the latter exits the process on a
+    /// parse error, which takes the whole test binary with it.
+    fn args(extra: &[&str]) -> Args {
+        let mut argv = vec!["dragonfly-sim"];
+        argv.extend_from_slice(extra);
+        Args::try_parse_from(argv).expect("arguments should parse")
+    }
+
+    /// The failure this guards is silent, not loud: `scale_at` clamps a negative
+    /// ramp to zero progress and publishes a nominal engine, so the run looks
+    /// healthy while the command line says otherwise.
+    #[test]
+    fn a_ramp_that_would_disable_the_fault_is_rejected() {
+        assert!(validate_fault(&args(&["--fault-cylinder", "3", "--fault-ramp=-1"])).is_err());
+    }
+
+    #[test]
+    fn a_scale_that_would_add_fuel_is_rejected() {
+        assert!(validate_fault(&args(&["--fault-cylinder", "3", "--fault-scale", "1.2"])).is_err());
+    }
+
+    #[test]
+    fn non_finite_is_rejected_before_it_reaches_the_integrator() {
+        assert!(validate_fault(&args(&["--fault-cylinder", "3", "--fault-scale", "nan"])).is_err());
+    }
+
+    #[test]
+    fn defaults_describe_the_demonstration_fault() {
+        assert!(validate_fault(&args(&["--fault-cylinder", "3"])).is_ok());
+    }
+
+    /// Without a cylinder there is no fault, so the other three arguments are
+    /// inert and rejecting them would fail a healthy run for no reason.
+    #[test]
+    fn fault_arguments_are_inert_on_a_healthy_run() {
+        assert!(validate_fault(&args(&["--fault-scale", "9"])).is_ok());
     }
 }
