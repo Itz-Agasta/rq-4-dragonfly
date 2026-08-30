@@ -16,9 +16,16 @@ import { FAULT_CYLINDER } from "@/components/ops/data";
 import { SchematicDrawing } from "@/components/ops/SchematicDrawing";
 import { Button } from "@/components/ui/button";
 import { fmt, grouped, NO_VALUE } from "@/lib/fmt";
-import { useLiveText } from "@/lib/live";
-import type { Frame } from "@/lib/telemetry";
+import { useLiveSink, useLiveText } from "@/lib/live";
+import { type Frame, isFresh } from "@/lib/telemetry";
 import { useApp } from "@/store/app";
+import type { SourceKey } from "@/store/frame";
+
+// The MAF box shows lambda alongside, which arrives on a different message, so
+// it answers to both. See the channel registry for who carries what.
+const ENGINE: readonly SourceKey[] = ["engine_ms"];
+const AUX: readonly SourceKey[] = ["auxiliary_ms"];
+const AUX_AND_ENGINE: readonly SourceKey[] = ["auxiliary_ms", "engine_ms"];
 
 const STRUCTURE = "var(--structure)";
 const KEY_EDGE = "var(--structure-hi)";
@@ -40,11 +47,33 @@ interface CalloutProps {
   y: number;
   width: number;
   label: string;
+  /**
+   * Bus sources feeding this callout. The box goes stale when any one of them
+   * goes quiet, not when all of them do.
+   */
+  sources: readonly SourceKey[];
   accent?: boolean;
   children: React.ReactNode;
 }
 
-function Callout({ x, y, width, label, accent = false, children }: CalloutProps) {
+function Callout({ x, y, width, label, sources, accent = false, children }: CalloutProps) {
+  const value = useRef<SVGTextElement>(null);
+  const flag = useRef<SVGTSpanElement>(null);
+
+  useLiveSink((f) => {
+    // Any rather than all, deliberately. Marking a live value stale understates
+    // its health; leaving a frozen one bright overstates it, and only one of
+    // those two errors gets an operator to trust a number that stopped moving.
+    const stale = sources.some((s) => !isFresh(f.ages[s]));
+    const el = value.current;
+    if (el && stale !== el.hasAttribute("data-stale")) el.toggleAttribute("data-stale", stale);
+    // Dimming alone cannot be read as anything in particular, so the box also
+    // says the word, in the label rather than over the value.
+    const mark = flag.current;
+    const text = stale ? " · STALE" : "";
+    if (mark && mark.textContent !== text) mark.textContent = text;
+  });
+
   return (
     <g>
       <rect
@@ -64,8 +93,15 @@ function Callout({ x, y, width, label, accent = false, children }: CalloutProps)
         letterSpacing="0.8"
       >
         {label}
+        <tspan ref={flag} fill="var(--foreground-dim)" />
       </text>
-      <text x={x + 12} y={y + 40} fontSize="14" fill={accent ? ACCENT : "var(--foreground)"}>
+      <text
+        ref={value}
+        x={x + 12}
+        y={y + 40}
+        fontSize="14"
+        fill={accent ? ACCENT : "var(--foreground)"}
+      >
         {children}
       </text>
     </g>
@@ -116,6 +152,7 @@ function Overlay() {
           y={6}
           width={88}
           label={`EGT ${i + 1}`}
+          sources={ENGINE}
           accent={i + 1 === FAULT_CYLINDER}
         >
           <LiveSpan select={(f) => fmt(f.egt_k[i] ?? Number.NaN, 0)} />
@@ -123,7 +160,7 @@ function Overlay() {
         </Callout>
       ))}
 
-      <Callout x={20} y={6} width={188} label="MAP · INTAKE PLENUM">
+      <Callout x={20} y={6} width={188} label="MAP · INTAKE PLENUM" sources={ENGINE}>
         <LiveSpan select={(f) => grouped(f.map_pa / 100)} />
         <Unit>hPa</Unit>
         <tspan fill="var(--foreground-dim)" fontSize="11" dx="10">
@@ -131,12 +168,12 @@ function Overlay() {
         </tspan>
       </Callout>
 
-      <Callout x={920} y={20} width={188} label="TURBO SPEED">
+      <Callout x={920} y={20} width={188} label="TURBO SPEED" sources={AUX}>
         <LiveSpan select={(f) => grouped(f.tc_rpm)} />
         <Unit>rpm</Unit>
       </Callout>
 
-      <Callout x={920} y={150} width={188} label="MAF · COMPRESSOR IN">
+      <Callout x={920} y={150} width={188} label="MAF · COMPRESSOR IN" sources={AUX_AND_ENGINE}>
         <LiveSpan select={(f) => fmt(f.maf_kgs, 3)} />
         <Unit>kg/s</Unit>
         <tspan fill="var(--foreground-dim)" fontSize="11" dx="10">
@@ -144,7 +181,7 @@ function Overlay() {
         </tspan>
       </Callout>
 
-      <Callout x={120} y={480} width={188} label="OIL · SUMP">
+      <Callout x={120} y={480} width={188} label="OIL · SUMP" sources={ENGINE}>
         <LiveSpan select={(f) => fmt(f.oil_p_pa / 1e5, 2)} />
         <Unit>bar</Unit>
         <tspan fill="var(--foreground-dim)" fontSize="11" dx="10">

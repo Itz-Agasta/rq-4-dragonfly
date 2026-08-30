@@ -211,6 +211,17 @@
       "zero" 1;
   }
 
+  /* Live-value states. Set from the render loop as attributes rather than
+     classes, because a class change would mean a React render at 20 Hz.
+     Stale outranks alarm: a threshold crossed by a value that stopped updating
+     is not a measurement, so it must not be allowed to paint the accent. */
+  [data-stale] {
+    opacity: 0.42;
+  }
+  [data-alarm]:not([data-stale]) {
+    color: var(--primary);
+  }
+
   /* 10px uppercase labels, labels only */
   .label-micro {
     font-family: var(--font-mono);
