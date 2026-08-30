@@ -107,7 +107,7 @@ fn validate_fault(args: &Args) -> Result<()> {
     );
     ensure!(
         args.fault_scale.is_finite() && (0.0..1.0).contains(&args.fault_scale),
-        "--fault-scale is the fraction of nominal injector flow the fault settles at, so it must be in 0.0 to 1.0 and below nominal to be a fault at all, got {}",
+        "--fault-scale is the fraction of nominal injector flow the fault settles at, so it must be at least 0.0 and below 1.0 to remove any fuel at all, got {}",
         args.fault_scale
     );
     Ok(())
@@ -241,6 +241,15 @@ mod tests {
     #[test]
     fn non_finite_is_rejected_before_it_reaches_the_integrator() {
         assert!(validate_fault(&args(&["--fault-cylinder", "3", "--fault-scale", "nan"])).is_err());
+    }
+
+    /// The extreme of the same fault, not a different one. `--fault-scale 0` is a
+    /// totally blocked injector, and the model already answers for it: `lambda`
+    /// returns infinity on zero fuel and `indicated_efficiency` reads a non-finite
+    /// lambda as zero equivalence ratio.
+    #[test]
+    fn a_totally_blocked_injector_is_allowed() {
+        assert!(validate_fault(&args(&["--fault-cylinder", "3", "--fault-scale", "0"])).is_ok());
     }
 
     #[test]
