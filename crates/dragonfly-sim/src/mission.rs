@@ -69,12 +69,18 @@ impl Profile {
     fn key_points(self) -> &'static [KeyPoint] {
         match self {
             // Held indefinitely: the last point repeats once the table runs out.
+            //
+            // The fuelling demand is identified rather than chosen. At 0.38, and only
+            // near it, the model reproduces the reported brake power, crank torque,
+            // propeller torque and propeller speed at this altitude simultaneously,
+            // all within 1%. `engine-model`'s `cruise_point` example is the sweep that
+            // locates it; move this and those four stop agreeing.
             Self::Cruise => &[KeyPoint {
                 t_s: 0.0,
                 altitude_ft: 22_400.0,
                 isa_deviation_k: -1.6,
                 indicated_airspeed_kt: 78.0,
-                fuel_cmd: 0.35,
+                fuel_cmd: 0.38,
                 rpm_cmd: 3720.0,
             }],
             Self::HighAltitude => &[
@@ -261,6 +267,10 @@ mod tests {
             c.tas_m_s > c.ias_m_s,
             "true airspeed exceeds indicated aloft"
         );
+        // Pinned because it is a fitted value, not a preference: it is the one
+        // demand at which power, both torques and propeller speed all agree with
+        // the reported operating point at once.
+        assert!((c.fuel_cmd - 0.38).abs() < 1e-9, "{}", c.fuel_cmd);
     }
 
     /// The square-root density relation, which is the correction that makes
