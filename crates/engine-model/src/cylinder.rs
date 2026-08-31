@@ -78,6 +78,29 @@ pub fn per_cylinder_fuel(p: &EngineParams, u_f_mg: f64) -> [f64; crate::CYLINDER
     std::array::from_fn(|i| u_f_mg * p.cylinder.injector_scale[i])
 }
 
+/// Fuel that releases its heat, from the fuel that was delivered.
+///
+/// Everything thermodynamic downstream takes this rather than the delivered
+/// quantity: heat release, exhaust temperature, heat into the head, and the
+/// oxygen a lambda probe finds left over. What still takes the delivered quantity
+/// is the mass flow, because unburnt fuel leaves the tank and passes through the
+/// exhaust all the same.
+///
+/// Post-oxidation in the manifold is deliberately **not** modelled. A diesel
+/// exhaust carries enough excess oxygen at 800 K for some of the unburnt charge to
+/// burn on its way to the turbine, which would recover part of the temperature
+/// drop, but nothing here could calibrate how much and guessing would soften the
+/// one signature misfire is diagnosed by.
+/// Unit agnostic: `delivered` may be a mass flow or a mass per cycle, and both
+/// callers exist.
+#[must_use]
+pub fn burned_fuel(
+    p: &EngineParams,
+    delivered: &[f64; crate::CYLINDERS],
+) -> [f64; crate::CYLINDERS] {
+    std::array::from_fn(|i| delivered[i] * p.cylinder.combustion_efficiency[i])
+}
+
 /// Excess air ratio. Returns `f64::INFINITY` on zero fuel, which is the physically
 /// correct limit for a motoring engine and keeps the caller from dividing by zero.
 #[must_use]
@@ -136,14 +159,18 @@ pub fn indicated_efficiency(p: &EngineParams, lambda: f64) -> f64 {
 /// Each cylinder contributes its own heat release at its own efficiency, so a
 /// cylinder running lean contributes less. Summing rather than scaling a mean is
 /// what lets a single-cylinder fault reach brake torque.
+///
+/// The quantity is the fuel that **burned**, not the fuel that was delivered; see
+/// [`burned_fuel`]. A misfiring cylinder does no indicated work on the charge it
+/// was given.
 #[must_use]
 pub fn imep_gross(
     p: &EngineParams,
     eta_ig: &[f64; crate::CYLINDERS],
-    u_f_mg: &[f64; crate::CYLINDERS],
+    u_f_burned_mg: &[f64; crate::CYLINDERS],
 ) -> f64 {
     let work: f64 = (0..crate::CYLINDERS)
-        .map(|i| eta_ig[i] * u_f_mg[i] * 1e-6)
+        .map(|i| eta_ig[i] * u_f_burned_mg[i] * 1e-6)
         .sum();
     work * p.fuel.lhv_j_per_kg / p.geometry.displacement_m3
 }
@@ -155,6 +182,11 @@ pub fn imep_gross(
 /// diagnosis: exhaust temperature rises when a cylinder runs lean at constant air
 /// flow, and rises with exhaust back pressure.
 ///
+/// `w_fuel` is what was delivered and `w_fuel_burned` is what released its heat.
+/// They differ only on a misfiring cylinder, and separating them is what stops
+/// unburnt fuel from heating a gas it never ignited in while still counting towards
+/// the mass being expanded.
+///
 /// Ekberg, Leek & Eriksson, "Validation of an Open-Source Mean-Value Heavy-Duty
 /// Diesel Engine Model", SIMS 59, 2018, eq. 21.
 /// https://doi.org/10.3384/ecp18153290
@@ -163,6 +195,7 @@ pub fn exhaust_temperature(
     p: &EngineParams,
     w_air: f64,
     w_fuel: f64,
+    w_fuel_burned: f64,
     p_im: f64,
     p_em: f64,
     t_im: f64,
@@ -171,7 +204,7 @@ pub fn exhaust_temperature(
     if total <= 0.0 || p_im <= 0.0 {
         return t_im;
     }
-    let q_in = w_fuel / total * p.fuel.lhv_j_per_kg;
+    let q_in = w_fuel_burned / total * p.fuel.lhv_j_per_kg;
     let gamma = p.gas.gamma_air;
     let r_c = p.geometry.compression_ratio;
     let pressure_ratio = (p_em / p_im).max(1e-6);
@@ -287,8 +320,9 @@ mod tests {
     #[test]
     fn leaning_a_cylinder_lowers_its_exhaust_temperature() {
         let p = engines::ae330();
-        let nominal = exhaust_temperature(&p, 0.20, 0.0088, 3.1e5, 3.45e5, 320.0);
-        let coked = exhaust_temperature(&p, 0.20, 0.0088 * 0.84, 3.1e5, 3.45e5, 320.0);
+        let nominal = exhaust_temperature(&p, 0.20, 0.0088, 0.0088, 3.1e5, 3.45e5, 320.0);
+        let coked =
+            exhaust_temperature(&p, 0.20, 0.0088 * 0.84, 0.0088 * 0.84, 3.1e5, 3.45e5, 320.0);
         assert!(
             coked < nominal,
             "coked {coked} should be cooler than nominal {nominal}"
@@ -326,6 +360,46 @@ mod tests {
         assert!(fuel_flow(&p, 0.0, 0.0).is_finite());
         assert!(per_cylinder_fuel(&p, 0.0).iter().all(|v| v.is_finite()));
         assert!(indicated_efficiency(&p, f64::INFINITY).is_finite());
-        assert!(exhaust_temperature(&p, 0.0, 0.0, 0.0, 0.0, 320.0).is_finite());
+        assert!(exhaust_temperature(&p, 0.0, 0.0, 0.0, 0.0, 0.0, 320.0).is_finite());
+    }
+
+    /// The pair of faults a threshold monitor cannot separate, separated.
+    ///
+    /// Both make one cylinder cooler and lean. What differs is upstream of the
+    /// cylinder: a restricted nozzle never delivers the fuel, so it never leaves the
+    /// tank, while a misfiring cylinder is fuelled normally and passes it through
+    /// unburnt. Fuel flow is the discriminating channel and this is where that
+    /// becomes true of the model rather than of the prose.
+    #[test]
+    fn misfire_and_coking_differ_on_delivered_fuel_and_agree_on_everything_else() {
+        let p = engines::ae330();
+        let (air, fuel) = (0.20, 0.0088);
+        let severity = 0.16;
+
+        let coked = exhaust_temperature(
+            &p,
+            air,
+            fuel * (1.0 - severity),
+            fuel * (1.0 - severity),
+            3.1e5,
+            3.45e5,
+            320.0,
+        );
+        let misfiring =
+            exhaust_temperature(&p, air, fuel, fuel * (1.0 - severity), 3.1e5, 3.45e5, 320.0);
+        let nominal = exhaust_temperature(&p, air, fuel, fuel, 3.1e5, 3.45e5, 320.0);
+
+        assert!(misfiring < nominal, "misfire must run the exhaust cooler");
+        // Within a few kelvin of each other: the extra unburnt mass in the misfiring
+        // case dilutes the same heat release over a slightly larger stream.
+        assert!((misfiring - coked).abs() < 5.0, "{misfiring} vs {coked}");
+
+        let mut misfire_params = p.clone();
+        misfire_params.cylinder.combustion_efficiency[2] = 1.0 - severity;
+        let burned = burned_fuel(&misfire_params, &[fuel; crate::CYLINDERS]);
+        assert!((burned[2] - fuel * (1.0 - severity)).abs() < 1e-15);
+        for i in [0, 1, 3] {
+            assert!((burned[i] - fuel).abs() < 1e-15, "cylinder {i} moved");
+        }
     }
 }

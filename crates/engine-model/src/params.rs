@@ -113,6 +113,16 @@ pub struct Cylinder {
     /// Per-cylinder injector flow scale. Unity on a healthy engine; this is the
     /// parameter an injector fault acts on.
     pub injector_scale: [f64; crate::CYLINDERS],
+    /// Per-cylinder fraction of the delivered fuel that releases its heat. Unity
+    /// on a healthy engine; this is the parameter misfire acts on.
+    ///
+    /// Deliberately separate from `injector_scale`, and the pair is what makes an
+    /// injection fault distinguishable from a combustion one. A restricted nozzle
+    /// never puts the fuel in the cylinder, so total fuel flow falls with the
+    /// torque; a misfiring cylinder is fuelled normally and burns none of it, so
+    /// torque falls at unchanged fuel flow. Every other channel moves the same way
+    /// for both, which is why a threshold monitor cannot separate them.
+    pub combustion_efficiency: [f64; crate::CYLINDERS],
 }
 
 /// Rubbing and accessory losses.

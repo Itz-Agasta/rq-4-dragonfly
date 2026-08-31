@@ -209,13 +209,38 @@ pub fn evaluate(p: &EngineParams, x: &State, u: &Inputs) -> Outputs {
         std::array::from_fn(|i| cylinder::fuel_flow(p, u_f_cylinder[i], x.omega_e));
     let w_fuel: f64 = w_fuel_cylinder.iter().sum();
 
-    let lambda_cylinder: [f64; CYLINDERS] =
-        std::array::from_fn(|i| cylinder::lambda(p, w_air_cylinder, w_fuel_cylinder[i]));
-    let lambda = cylinder::lambda(p, w_air, w_fuel);
-    let eta_ig: [f64; CYLINDERS] =
-        std::array::from_fn(|i| cylinder::indicated_efficiency(p, lambda_cylinder[i]));
+    // Delivered above, burned here. Identical on a healthy engine; a misfiring
+    // cylinder is the only thing that separates them, and everything thermodynamic
+    // below takes the burned quantity while the published fuel flow stays delivered.
+    let w_fuel_burned_cylinder = cylinder::burned_fuel(p, &w_fuel_cylinder);
+    let u_f_burned = cylinder::burned_fuel(p, &u_f_cylinder);
+    let w_fuel_burned: f64 = w_fuel_burned_cylinder.iter().sum();
 
-    let imep_gross = cylinder::imep_gross(p, &eta_ig, &u_f_cylinder);
+    // Excess air is what an oxygen probe reads, so it is set by the fuel that
+    // consumed oxygen. Unburnt fuel leaves its share of the air untouched and the
+    // cylinder reads lean, which is why misfire and a restricted nozzle look alike
+    // on this channel and are told apart on fuel flow.
+    let lambda_cylinder: [f64; CYLINDERS] =
+        std::array::from_fn(|i| cylinder::lambda(p, w_air_cylinder, w_fuel_burned_cylinder[i]));
+    let lambda = cylinder::lambda(p, w_air, w_fuel_burned);
+
+    // Efficiency is evaluated at the **delivered** mixture, not the burned one, and
+    // the difference is the whole of how misfire produces work. Misfire is a
+    // cycle-to-cycle event: the cycles that ignite run on the charge they were
+    // given, at their own unchanged excess air ratio, and the ones that do not
+    // produce nothing. So the mean work is the nominal efficiency times the fuel
+    // that burned, and the fault enters through the mass alone.
+    //
+    // Evaluating efficiency at the burned-fuel ratio instead would put the firing
+    // cycles at a leaner mixture than any of them ever saw, and since the
+    // efficiency island is curved that charges misfire a second torque penalty it
+    // has no mechanism for. A restricted nozzle is unaffected either way, because
+    // there the charge really is leaner on every cycle.
+    let eta_ig: [f64; CYLINDERS] = std::array::from_fn(|i| {
+        cylinder::indicated_efficiency(p, cylinder::lambda(p, w_air_cylinder, w_fuel_cylinder[i]))
+    });
+
+    let imep_gross = cylinder::imep_gross(p, &eta_ig, &u_f_burned);
     let torque_indicated = friction::torque_from_mep(p, imep_gross);
     let torque_friction = friction::friction_torque(p, x.omega_e);
     let torque_pumping = friction::pumping_torque(p, x.p_im, x.p_em);
@@ -226,6 +251,7 @@ pub fn evaluate(p: &EngineParams, x: &State, u: &Inputs) -> Outputs {
             p,
             w_air_cylinder,
             w_fuel_cylinder[i],
+            w_fuel_burned_cylinder[i],
             x.p_im,
             x.p_em,
             t_intake,
@@ -249,7 +275,7 @@ pub fn evaluate(p: &EngineParams, x: &State, u: &Inputs) -> Outputs {
     let heat_to_coolant: f64 = (0..CYLINDERS)
         .map(|i| head_conductance * (x.t_cht[i] - x.t_coolant))
         .sum();
-    let heat_to_oil = oil::heat_into_oil(p, torque_friction * x.omega_e, w_fuel);
+    let heat_to_oil = oil::heat_into_oil(p, torque_friction * x.omega_e, w_fuel_burned);
 
     Outputs {
         t_intake,
@@ -263,6 +289,7 @@ pub fn evaluate(p: &EngineParams, x: &State, u: &Inputs) -> Outputs {
         u_f_cylinder,
         w_fuel,
         w_fuel_cylinder,
+        w_fuel_burned_cylinder,
         lambda,
         lambda_cylinder,
         eta_ig,
@@ -312,7 +339,7 @@ pub fn derivative(p: &EngineParams, x: &State, u: &Inputs) -> State {
                 p,
                 x.t_cht[i],
                 x.t_coolant,
-                o.w_fuel_cylinder[i],
+                o.w_fuel_burned_cylinder[i],
                 x.omega_e,
             )
         }),
@@ -401,6 +428,52 @@ mod tests {
 
         let bsfc = o.bsfc_g_per_kwh().unwrap();
         assert!((200.0..280.0).contains(&bsfc), "bsfc {bsfc} g/kWh");
+    }
+
+    /// Misfire is a cycle-to-cycle event, so its cost is linear in the rate.
+    ///
+    /// A cylinder failing a fifth of its firings loses exactly a fifth of its
+    /// indicated work and no more: the cycles that ignite are untouched. The bug
+    /// this pins is subtle and was live for one session: evaluating indicated
+    /// efficiency at the burned-fuel excess air ratio puts the firing cycles at a
+    /// mixture none of them ever saw, and the curvature of the efficiency island
+    /// then charges misfire a second torque penalty with no mechanism behind it.
+    #[test]
+    fn misfire_costs_work_in_proportion_to_the_firings_it_loses() {
+        let p = engines::ae330();
+        let x = State {
+            p_im: p.control.map_setpoint_pa,
+            p_em: 3.45e5,
+            omega_e: omega(3880.0),
+            omega_tc: 14_900.0,
+            ..State::at_rest(atmosphere::isa(0.0).p, 3880.0)
+        };
+        let u = sea_level(1.0, 0.0);
+        let healthy = evaluate(&p, &x, &u);
+
+        for rate in [0.10, 0.20, 0.50] {
+            let mut faulted = p.clone();
+            faulted.cylinder.combustion_efficiency[2] = 1.0 - rate;
+            let o = evaluate(&faulted, &x, &u);
+
+            // One cylinder of four losing `rate` of its work.
+            let expected = healthy.torque_indicated * (1.0 - rate / CYLINDERS as f64);
+            assert!(
+                (o.torque_indicated - expected).abs() / expected < 1e-12,
+                "at rate {rate} indicated torque is {} against {expected}",
+                o.torque_indicated
+            );
+            // The firing cycles keep their own efficiency, and the neighbours keep
+            // theirs. Only the mass that burned changed.
+            for i in 0..CYLINDERS {
+                assert!(
+                    (o.eta_ig[i] - healthy.eta_ig[i]).abs() < 1e-12,
+                    "cylinder {i} efficiency moved at rate {rate}"
+                );
+            }
+            // Fuel still leaves the tank, which is the discriminating channel.
+            assert!((o.w_fuel - healthy.w_fuel).abs() / healthy.w_fuel < 1e-12);
+        }
     }
 
     #[test]

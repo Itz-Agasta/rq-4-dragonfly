@@ -38,8 +38,11 @@ pub struct Outputs {
     pub u_f_cylinder: [f64; CYLINDERS],
     /// Total fuel mass flow, kg/s.
     pub w_fuel: f64,
-    /// Fuel mass flow per cylinder, kg/s.
+    /// Fuel mass flow per cylinder as delivered by the injector, kg/s.
     pub w_fuel_cylinder: [f64; CYLINDERS],
+    /// Fuel mass flow per cylinder that released its heat, kg/s. Equal to
+    /// [`Outputs::w_fuel_cylinder`] except on a misfiring cylinder.
+    pub w_fuel_burned_cylinder: [f64; CYLINDERS],
     /// Excess air ratio over all cylinders. Infinite while motoring.
     pub lambda: f64,
     /// Excess air ratio per cylinder.
