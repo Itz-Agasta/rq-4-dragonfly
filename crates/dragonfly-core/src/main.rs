@@ -195,18 +195,13 @@ async fn pump(
                 && frame.ages.power_ms < stale_ms;
 
             if measurement_fresh {
-                // Only stepped on live data. Feeding a frozen measurement to an
-                // estimator makes it more confident every frame that the engine
-                // is exactly where it stopped reporting from, which is the
-                // opposite of what a silent bus means.
-                if let Err(error) = twin.update(&frame.measurement(params.limits.rated_power_w)) {
-                    tracing::warn!(%error, "twin lost its estimate, re-seeding");
-                }
-                // Attached only on the tick it was current for. Carrying the
-                // last estimate forward on a stale frame would present an old
-                // diagnosis as synchronised with a measurement it never saw.
-                if twin.is_seeded() {
-                    frame.twin = Some(twin.output().clone());
+                match twin.update(&frame.measurement(params.limits.rated_power_w)) {
+                    // Attached only to the frame it was computed from. Carrying
+                    // the last estimate forward would present an old diagnosis
+                    // as synchronised with a measurement the twin never saw.
+                    Ok(Some(output)) => frame.twin = Some(output.clone()),
+                    Ok(None) => {}
+                    Err(error) => tracing::warn!(%error, "twin lost its estimate, re-seeding"),
                 }
             }
             link.record(frame.seq, frame.link_ok, twin.output().locked);

@@ -213,6 +213,35 @@ fn a_healthy_engine_locks_and_stays_locked() {
     }
 }
 
+/// An engine that has stopped while its controller keeps broadcasting is the case
+/// a health monitor must not lie in: the last diagnosis is still sitting in the
+/// twin, and a caller told only "no error" would attach it to the new frame.
+#[test]
+fn an_unusable_measurement_yields_no_estimate() {
+    const DT: f64 = 0.05;
+    let c = Condition::cruise();
+    let mut plant = Plant::new(&c);
+    let mut twin = Twin::new(engine_model::engines::ae330());
+    twin.update(&plant.advance(&c, DT, 1.0)).expect("seeds");
+    let seeded = twin.output().rms_pct;
+
+    // Zero speed makes the load percentage on the bus unresolvable into a torque,
+    // which is how a stopped engine reaches the twin.
+    let mut stopped = plant.advance(&c, DT, 1.0);
+    stopped.rpm = 0.0;
+    stopped.torque_nm = f64::NAN;
+
+    assert!(
+        twin.update(&stopped).expect("no filter error").is_none(),
+        "an unusable measurement must not hand back an estimate"
+    );
+    assert!(
+        twin.is_seeded(),
+        "the estimate is kept, it just is not current"
+    );
+    assert_eq!(twin.output().rms_pct, seeded, "nothing advanced");
+}
+
 /// A healthy engine must not be diagnosed. Every parameter staying within its own
 /// posterior of nominal is the statement that the filter is not inventing faults to
 /// explain its own modelling error.

@@ -259,14 +259,19 @@ impl Twin {
 
     /// Advance one telemetry frame.
     ///
+    /// `Ok(None)` means the measurement was unusable and nothing advanced, so no
+    /// estimate belongs to that frame. Handing the previous output back instead
+    /// would let a caller pair an old diagnosis with a new measurement, which is
+    /// the one failure a residual display cannot reveal.
+    ///
     /// # Errors
     ///
     /// If the filter loses positive definiteness or the model returns a non-finite
     /// value. The estimate is discarded on either, so the next usable measurement
     /// re-seeds rather than continuing from a state known to be wrong.
-    pub fn update(&mut self, m: &Measurement) -> Result<&TwinOutput, FilterError> {
+    pub fn update(&mut self, m: &Measurement) -> Result<Option<&TwinOutput>, FilterError> {
         if !m.is_usable() {
-            return Ok(&self.output);
+            return Ok(None);
         }
         let dt = self.step_seconds(m);
         if self.filter.is_none() {
@@ -286,7 +291,7 @@ impl Twin {
         match result {
             Ok(()) => {
                 self.output.transient = transient;
-                Ok(&self.output)
+                Ok(Some(&self.output))
             }
             Err(e) => {
                 self.filter = None;
