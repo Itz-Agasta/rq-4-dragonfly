@@ -204,7 +204,10 @@ async fn pump(
                     Err(error) => tracing::warn!(%error, "twin lost its estimate, re-seeding"),
                 }
             }
-            link.record(frame.seq, frame.link_ok, twin.output().locked);
+            // Read back out of the frame rather than off the twin, so the link
+            // status cannot claim a lock for a frame that carries no estimate.
+            let locked = frame.twin.as_ref().is_some_and(|t| t.locked);
+            link.record(frame.seq, frame.link_ok, locked);
             // A send with no subscribers is not an error; the core runs whether
             // or not anyone is watching, and the recorder will attach here too.
             let _ = frames.send(Arc::new(frame));
