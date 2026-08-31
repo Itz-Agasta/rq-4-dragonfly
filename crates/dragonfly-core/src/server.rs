@@ -18,6 +18,7 @@ use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
+use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
@@ -104,8 +105,17 @@ async fn websocket(upgrade: WebSocketUpgrade, State(state): State<AppState>) -> 
     upgrade.on_upgrade(move |socket| stream_frames(socket, state))
 }
 
-async fn stream_frames(mut socket: WebSocket, state: AppState) {
+async fn stream_frames(socket: WebSocket, state: AppState) {
     let mut rx = state.frames.subscribe();
+    // Split so the socket can be read and written at once. A connection that is
+    // only ever written to never processes an incoming ping, so it never answers
+    // one, and any client that pings on a timer disconnects when its timeout
+    // expires. Browsers do not ping, which is why this only shows up against a
+    // recorder or a test harness. The reader below discards what it receives;
+    // its purpose is to let the protocol layer see the ping and queue the pong,
+    // which the next telemetry frame flushes.
+    let (mut sink, mut stream) = socket.split();
+    let drain = tokio::spawn(async move { while stream.next().await.is_some() {} });
     tracing::info!("websocket client attached");
 
     loop {
@@ -116,11 +126,7 @@ async fn stream_frames(mut socket: WebSocket, state: AppState) {
                     // somehow does, dropping the client is better than looping.
                     break;
                 };
-                if socket
-                    .send(WsMessage::Binary(payload.into()))
-                    .await
-                    .is_err()
-                {
+                if sink.send(WsMessage::Binary(payload.into())).await.is_err() {
                     break;
                 }
             }
@@ -133,5 +139,6 @@ async fn stream_frames(mut socket: WebSocket, state: AppState) {
             Err(broadcast::error::RecvError::Closed) => break,
         }
     }
+    drain.abort();
     tracing::info!("websocket client detached");
 }
