@@ -24,6 +24,7 @@ use dronecan_ice::{
     ReciprocatingStatus, StaticPressure, StaticTemperature,
 };
 use serde::Serialize;
+use twin_core::{Measurement, TwinOutput};
 
 /// Number of cylinders reported. Matches the engine model.
 pub const CYLINDERS: usize = 4;
@@ -50,11 +51,13 @@ pub struct SourceAges {
     pub power_ms: u64,
 }
 
-/// One instant of fused telemetry.
+/// One instant of fused telemetry, with the twin's reading of it.
 ///
-/// Every field is a measurement or is derived from measurements alone. Nothing
-/// here comes from the model; the twin's predictions and the residuals are a
-/// separate frame that arrives once the twin exists.
+/// Everything above the `twin` field is a measurement or is derived from
+/// measurements alone. The twin's block is carried in the same frame rather than
+/// published separately so that a consumer cannot pair a prediction with a
+/// measurement from a different instant, which is the one way a residual display
+/// can lie without anything looking wrong.
 #[derive(Clone, Debug, Serialize)]
 pub struct Frame {
     /// Monotonic sequence number. A gap means the consumer fell behind.
@@ -128,6 +131,66 @@ pub struct Frame {
     pub engine_state: &'static str,
     /// Raw status flag bitmask, for a consumer that wants the detail.
     pub flags: u32,
+
+    /// What the twin makes of this instant, or `None` before it has an estimate.
+    pub twin: Option<TwinOutput>,
+}
+
+impl Frame {
+    /// Lay this frame out as the twin's input.
+    ///
+    /// Torque is not on the bus. What is broadcast is engine load as a whole
+    /// percent of the rating, so the torque handed to the twin is that percentage
+    /// turned back into a power and divided by the measured speed. The rounding is
+    /// declared as measurement noise on that channel rather than hidden.
+    #[must_use]
+    pub fn measurement(&self, rated_power_w: f64) -> Measurement {
+        let omega_e = f64::from(self.rpm) * std::f64::consts::TAU / 60.0;
+        let torque_nm = if omega_e > 0.0 {
+            f64::from(self.load_pct) / 100.0 * rated_power_w / omega_e
+        } else {
+            f64::NAN
+        };
+        Measurement {
+            t_s: self.t_s,
+            p_amb_pa: f64::from(self.p_amb_pa),
+            oat_k: f64::from(self.oat_k),
+            ias_m_s: f64::from(self.ias_ms),
+            wastegate: f64::from(self.wastegate),
+            // Every cylinder is commanded the same duration; the mean is taken so a
+            // single dropped cylinder status does not move the fuelling input.
+            injection_ms: mean_finite(&self.injection_ms),
+            rpm: f64::from(self.rpm),
+            map_pa: f64::from(self.map_pa),
+            mat_k: f64::from(self.mat_k),
+            maf_kg_s: f64::from(self.maf_kgs),
+            turbo_rpm: f64::from(self.tc_rpm),
+            torque_nm,
+            fuel_flow_kg_h: f64::from(self.fuel_flow_kgh),
+            oil_p_pa: f64::from(self.oil_p_pa),
+            oil_t_k: f64::from(self.oil_t_k),
+            coolant_t_k: f64::from(self.coolant_t_k),
+            egt_k: std::array::from_fn(|i| f64::from(self.egt_k[i])),
+            cht_k: std::array::from_fn(|i| f64::from(self.cht_k[i])),
+            lambda: std::array::from_fn(|i| f64::from(self.lambda_k[i])),
+            bus_v: f64::from(self.bus_v),
+            vib_rms_g: f64::from(self.vib_rms_g),
+            vib_kurtosis: f64::from(self.vib_kurtosis),
+        }
+    }
+}
+
+/// Mean of the finite entries, or `NaN` if there are none.
+fn mean_finite(values: &[f32; CYLINDERS]) -> f64 {
+    let (sum, count) = values
+        .iter()
+        .filter(|v| v.is_finite())
+        .fold((0.0f64, 0u32), |(s, n), v| (s + f64::from(*v), n + 1));
+    if count == 0 {
+        f64::NAN
+    } else {
+        sum / f64::from(count)
+    }
 }
 
 /// Holds the last value of every channel and builds frames from them.
@@ -295,6 +358,7 @@ impl Fusion {
             fuel_remaining_pct: f32::from(fuel.available_fuel_volume_percent),
             engine_state: state_name(status.state),
             flags: status.flags,
+            twin: None,
         })
     }
 }

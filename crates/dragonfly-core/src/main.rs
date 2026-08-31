@@ -5,9 +5,12 @@
 //! WebSocket at the rate the engine controller publishes. The frontend bundle is
 //! served from here too, so the demo is a single process plus a browser.
 //!
-//! The twin and the Parquet recorder are not wired in yet. Both attach at the
-//! same seam: every fused frame passes through the broadcast channel, so they
-//! become subscribers rather than changes to the ingest path.
+//! The twin runs inside the ingest loop rather than as a subscriber to the
+//! broadcast channel, because its output belongs in the frame: a consumer that
+//! received a prediction separately could pair it with a measurement from a
+//! different instant, and a residual display built on that would be wrong in a
+//! way nothing on screen would reveal. The Parquet recorder does attach as a
+//! subscriber, because it only reads.
 
 mod ingest;
 mod server;
@@ -20,8 +23,10 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use clap::Parser;
 use dronecan_ice::{AuxiliaryStatus, Message};
+use engine_model::EngineParams;
 use socketcan::{EmbeddedFrame, Id, tokio::CanSocket};
 use tokio::sync::broadcast;
+use twin_core::Twin;
 
 use ingest::{Decoded, Ingest};
 use server::{AppState, LinkStatus};
@@ -108,17 +113,23 @@ async fn ingest_loop(
     frames: broadcast::Sender<Arc<telemetry::Frame>>,
     link: Arc<LinkStatus>,
 ) -> Result<()> {
+    // The twin is built per connection rather than per process. A bus that has
+    // been down for seconds has left the estimate describing an engine that has
+    // since moved, and re-seeding from the first frame back costs one millisecond.
+    let params = engine_model::engines::ae330();
     let mut backoff = Duration::from_millis(250);
     loop {
         match CanSocket::open(&iface) {
             Ok(socket) => {
                 backoff = Duration::from_millis(250);
-                if let Err(error) = pump(&socket, auxiliary_data_type_id, &frames, &link).await {
+                if let Err(error) =
+                    pump(&socket, auxiliary_data_type_id, &frames, &link, &params).await
+                {
                     tracing::warn!(%error, "CAN read failed, reopening");
                 }
             }
             Err(error) => {
-                link.record(0, false);
+                link.record(0, false, false);
                 tracing::warn!(%error, iface = %iface, "cannot open interface, is `just can` done?");
             }
         }
@@ -132,9 +143,11 @@ async fn pump(
     auxiliary_data_type_id: u16,
     frames: &broadcast::Sender<Arc<telemetry::Frame>>,
     link: &LinkStatus,
+    params: &EngineParams,
 ) -> Result<()> {
     let mut ingest = Ingest::new(auxiliary_data_type_id);
     let mut fusion = Fusion::new();
+    let mut twin = Twin::new(params.clone());
     let mut logged = Instant::now();
 
     loop {
@@ -168,9 +181,22 @@ async fn pump(
             publish = true;
         }
 
-        if publish && let Some(frame) = fusion.frame(now) {
+        if publish && let Some(mut frame) = fusion.frame(now) {
             let stale = !frame.link_ok;
-            link.record(frame.seq, frame.link_ok);
+
+            // Only stepped on live data. Feeding a frozen measurement to an
+            // estimator makes it more confident every frame that the engine is
+            // exactly where it stopped reporting from, which is the opposite of
+            // what a silent bus means.
+            if frame.link_ok
+                && let Err(error) = twin.update(&frame.measurement(params.limits.rated_power_w))
+            {
+                tracing::warn!(%error, "twin lost its estimate, re-seeding");
+            }
+            if twin.is_seeded() {
+                frame.twin = Some(twin.output().clone());
+            }
+            link.record(frame.seq, frame.link_ok, twin.output().locked);
             // A send with no subscribers is not an error; the core runs whether
             // or not anyone is watching, and the recorder will attach here too.
             let _ = frames.send(Arc::new(frame));

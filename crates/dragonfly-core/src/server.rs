@@ -37,13 +37,16 @@ pub struct LinkStatus {
     pub last_seq: AtomicU64,
     /// Whether the engine has been heard from recently.
     pub link_ok: AtomicBool,
+    /// Whether the twin's residual has been small enough for long enough.
+    pub twin_locked: AtomicBool,
 }
 
 impl LinkStatus {
     /// Record a frame that has just been published.
-    pub fn record(&self, seq: u64, link_ok: bool) {
+    pub fn record(&self, seq: u64, link_ok: bool, twin_locked: bool) {
         self.last_seq.store(seq, Ordering::Relaxed);
         self.link_ok.store(link_ok, Ordering::Relaxed);
+        self.twin_locked.store(twin_locked, Ordering::Relaxed);
     }
 }
 
@@ -71,6 +74,8 @@ struct Health {
     last_seq: u64,
     /// Whether the engine has been heard from recently.
     link_ok: bool,
+    /// Whether the twin is synchronised.
+    twin_locked: bool,
 }
 
 /// Build the router.
@@ -98,6 +103,7 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
         clients: state.frames.receiver_count(),
         last_seq: state.link.last_seq.load(Ordering::Relaxed),
         link_ok: state.link.link_ok.load(Ordering::Relaxed),
+        twin_locked: state.link.twin_locked.load(Ordering::Relaxed),
     })
 }
 
