@@ -36,6 +36,15 @@ pub const CYLINDERS: usize = 4;
 /// short enough that an operator sees a dead bus within a glance.
 pub const STALE_AFTER: Duration = Duration::from_millis(250);
 
+/// A source publishing at the 5 Hz ambient rate is stale after this long.
+///
+/// [`STALE_AFTER`] is a single missed message for air data, which is what a
+/// display wants and what a gate must not use: one lost ambient frame would take
+/// the twin off screen. Three periods instead, and the outside air temperature
+/// that holds errs by 0.06 K at the steepest climb any profile flies, against a
+/// 0.8 K instrument sigma on the channel it reaches.
+pub const SLOW_STALE_AFTER: Duration = Duration::from_millis(600);
+
 /// How long ago each source last spoke, ms.
 #[derive(Clone, Copy, Debug, Default, Serialize)]
 pub struct SourceAges {
@@ -176,7 +185,14 @@ impl Frame {
             egt_k: std::array::from_fn(|i| f64::from(self.egt_k[i])),
             cht_k: std::array::from_fn(|i| f64::from(self.cht_k[i])),
             lambda: std::array::from_fn(|i| f64::from(self.lambda_k[i])),
-            bus_v: f64::from(self.bus_v),
+            // Blanked when the power module falls silent. Bus voltage is not a
+            // filter channel, so a frozen one can only score the electrical index
+            // as though it were live, and threshold monitoring cannot notice.
+            bus_v: if self.ages.power_ms < SLOW_STALE_AFTER.as_millis() as u64 {
+                f64::from(self.bus_v)
+            } else {
+                f64::NAN
+            },
             vib_rms_g: f64::from(self.vib_rms_g),
             vib_kurtosis: f64::from(self.vib_kurtosis),
         }
@@ -516,6 +532,31 @@ mod tests {
         );
         let frame = fusion.frame(now).expect("a frame");
         assert!(frame.ages.air_data_ms >= 1000, "{}", frame.ages.air_data_ms);
+    }
+
+    /// A frozen bus voltage would score the electrical health index as though it
+    /// were live, and threshold monitoring has nothing in it to notice the value
+    /// has stopped moving.
+    #[test]
+    fn a_stale_bus_voltage_does_not_reach_the_twin() {
+        let now = Instant::now();
+        let mut fusion = Fusion::new();
+        let volts = CircuitStatus {
+            circuit_id: 1,
+            voltage: 27.8,
+            current: 30.0,
+            error_flags: 0,
+        };
+
+        fusion.engine(now, running_status());
+        fusion.bus(now, volts);
+        let fresh = fusion.frame(now).expect("a frame");
+        assert!(fresh.measurement(132_000.0).bus_v.is_finite());
+
+        fusion.bus(now - SLOW_STALE_AFTER, volts);
+        let stale = fusion.frame(now).expect("a frame");
+        assert_eq!(stale.bus_v, 27.8, "the frame keeps the reading and its age");
+        assert!(stale.measurement(132_000.0).bus_v.is_nan());
     }
 
     /// `u64::MAX` does not survive MessagePack into a JavaScript number, so a

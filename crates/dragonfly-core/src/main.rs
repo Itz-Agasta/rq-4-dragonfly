@@ -30,7 +30,7 @@ use twin_core::Twin;
 
 use ingest::{Decoded, Ingest};
 use server::{AppState, LinkStatus};
-use telemetry::{Fusion, STALE_AFTER};
+use telemetry::{Fusion, SLOW_STALE_AFTER, STALE_AFTER};
 
 /// Frames buffered per WebSocket client before it is declared lagged.
 ///
@@ -183,16 +183,15 @@ async fn pump(
 
         if publish && let Some(mut frame) = fusion.frame(now) {
             let stale = !frame.link_ok;
-            let stale_ms = STALE_AFTER.as_millis() as u64;
-            // `frame.link_ok` covers only the engine controller. The twin's
-            // measurement also draws on the auxiliary, air-data and power
-            // sources, so a node other than the engine going silent would
-            // otherwise feed the estimator the same frozen reading forever,
-            // which it would read as an engine that has stopped moving.
+            // `link_ok` covers only the engine controller, and a silent auxiliary
+            // or air-data node would feed the estimator the same frozen reading
+            // every frame, which reads as an engine that stopped where it stopped
+            // talking. Power is left out on purpose: bus voltage is not a filter
+            // channel, so a dead voltmeter costs the one health index that
+            // `Frame::measurement` blanks, not the whole twin.
             let measurement_fresh = frame.link_ok
-                && frame.ages.auxiliary_ms < stale_ms
-                && frame.ages.air_data_ms < stale_ms
-                && frame.ages.power_ms < stale_ms;
+                && frame.ages.auxiliary_ms < STALE_AFTER.as_millis() as u64
+                && frame.ages.air_data_ms < SLOW_STALE_AFTER.as_millis() as u64;
 
             if measurement_fresh {
                 match twin.update(&frame.measurement(params.limits.rated_power_w)) {
