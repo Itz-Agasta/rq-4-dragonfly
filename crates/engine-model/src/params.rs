@@ -112,6 +112,10 @@ pub struct Cylinder {
     pub injector_flow_g_per_s: f64,
     /// Per-cylinder injector flow scale. Unity on a healthy engine; this is the
     /// parameter an injector fault acts on.
+    ///
+    /// Optional in a parameter file, because a file describes an engine and unity
+    /// is what a healthy engine has. See [`unity`].
+    #[serde(default = "unity")]
     pub injector_scale: [f64; crate::CYLINDERS],
     /// Per-cylinder fraction of the delivered fuel that releases its heat. Unity
     /// on a healthy engine; this is the parameter misfire acts on.
@@ -122,7 +126,22 @@ pub struct Cylinder {
     /// torque; a misfiring cylinder is fuelled normally and burns none of it, so
     /// torque falls at unchanged fuel flow. Every other channel moves the same way
     /// for both, which is why a threshold monitor cannot separate them.
+    ///
+    /// Optional in a parameter file, for the same reason as `injector_scale`.
+    #[serde(default = "unity")]
     pub combustion_efficiency: [f64; crate::CYLINDERS],
+}
+
+/// A per-cylinder scale with every cylinder at nominal.
+///
+/// The serde default for both per-cylinder arrays. Neither describes the engine:
+/// they exist so a fault can perturb one cylinder, and a file that says nothing
+/// about them is describing a healthy engine rather than an underspecified one.
+/// Making them optional also keeps this schema additive, which matters because
+/// adding a required field to a published crate breaks every file already written
+/// against it.
+fn unity() -> [f64; crate::CYLINDERS] {
+    [1.0; crate::CYLINDERS]
 }
 
 /// Rubbing and accessory losses.
@@ -591,6 +610,34 @@ impl EngineParams {
                 reason: "a compression-ignition engine cannot run rich of stoichiometric",
             });
         }
+        // The per-cylinder arrays, which the scalar sweep above cannot reach.
+        //
+        // These are the two values a fault moves, so they are the two most likely to
+        // be edited by hand, and a bad one is invisible until it is far from its
+        // cause: a non-finite scale multiplies into the fuel mass, survives the
+        // excess-air ratio because a NaN compares false against every bound, and
+        // surfaces as a NaN brake torque on the wire. Zero is allowed on both, and
+        // deliberately: a totally blocked nozzle and a dead cylinder are the
+        // extremes of real faults, and the model answers for them.
+        for i in 0..crate::CYLINDERS {
+            let scale = self.cylinder.injector_scale[i];
+            if !scale.is_finite() || scale < 0.0 {
+                return Err(ParamError::NotPhysical {
+                    field: "cylinder.injector_scale",
+                    value: scale,
+                    reason: "an injector cannot deliver a negative mass of fuel",
+                });
+            }
+            let burned = self.cylinder.combustion_efficiency[i];
+            if !burned.is_finite() || !(0.0..=1.0).contains(&burned) {
+                return Err(ParamError::NotPhysical {
+                    field: "cylinder.combustion_efficiency",
+                    value: burned,
+                    reason: "a cylinder cannot release less heat than none or more \
+                             than the fuel it was given holds",
+                });
+            }
+        }
         // Bore and stroke are not used by any equation; they are here so the
         // schematic and the vibration orders can be drawn from the same source. If
         // they disagree with the displacement, one of the three is a typo.
@@ -635,5 +682,80 @@ mod tests {
     fn inconsistent_geometry_is_rejected() {
         let bad = engines::AE330_TOML.replace("0.0830", "0.0900");
         assert!(super::EngineParams::from_toml(&bad).is_err());
+    }
+
+    /// A file that says nothing about the per-cylinder scales describes a healthy
+    /// engine, and has to load. Both arrays were added after the first parameter
+    /// file was written, and making either one required would reject every file
+    /// already written against this schema.
+    #[test]
+    fn a_file_that_omits_the_per_cylinder_scales_loads_as_healthy() {
+        let older = engines::AE330_TOML
+            .replace("injector_scale = [1.0, 1.0, 1.0, 1.0] # estimated", "")
+            .replace(
+                "combustion_efficiency = [1.0, 1.0, 1.0, 1.0] # estimated",
+                "",
+            );
+        let p = super::EngineParams::from_toml(&older).expect("an older file must load");
+        assert_eq!(p.cylinder.injector_scale, [1.0; crate::CYLINDERS]);
+        assert_eq!(p.cylinder.combustion_efficiency, [1.0; crate::CYLINDERS]);
+    }
+
+    /// The scalar sweep in `validate` cannot reach an array, and these two arrays
+    /// are the ones a hand edit is most likely to touch because they are what a
+    /// fault moves. A non-finite entry is the dangerous case: it compares false
+    /// against every bound, multiplies into the fuel mass and surfaces as a NaN
+    /// brake torque on the wire, hours from its cause.
+    #[test]
+    fn a_per_cylinder_scale_outside_its_range_is_rejected() {
+        let cases = [
+            (
+                "injector_scale = [1.0, 1.0, 1.0, 1.0]",
+                "[1.0, nan, 1.0, 1.0]",
+            ),
+            (
+                "injector_scale = [1.0, 1.0, 1.0, 1.0]",
+                "[1.0, -0.2, 1.0, 1.0]",
+            ),
+            (
+                "combustion_efficiency = [1.0, 1.0, 1.0, 1.0]",
+                "[1.0, 1.0, nan, 1.0]",
+            ),
+            (
+                "combustion_efficiency = [1.0, 1.0, 1.0, 1.0]",
+                "[1.0, 1.0, 1.4, 1.0]",
+            ),
+        ];
+        for (needle, bad) in cases {
+            let field = needle.split(' ').next().expect("a field name");
+            let toml = engines::AE330_TOML.replace(needle, &format!("{field} = {bad}"));
+            assert!(
+                super::EngineParams::from_toml(&toml).is_err(),
+                "{field} = {bad} was accepted"
+            );
+        }
+    }
+
+    /// The extremes are faults, not errors: a totally blocked nozzle and a cylinder
+    /// that never lights are both reachable, and the model answers for them.
+    #[test]
+    fn a_dead_cylinder_is_a_fault_rather_than_a_bad_parameter_file() {
+        for (needle, extreme) in [
+            (
+                "injector_scale = [1.0, 1.0, 1.0, 1.0]",
+                "[1.0, 0.0, 1.0, 1.0]",
+            ),
+            (
+                "combustion_efficiency = [1.0, 1.0, 1.0, 1.0]",
+                "[1.0, 1.0, 0.0, 1.0]",
+            ),
+        ] {
+            let field = needle.split(' ').next().expect("a field name");
+            let toml = engines::AE330_TOML.replace(needle, &format!("{field} = {extreme}"));
+            assert!(
+                super::EngineParams::from_toml(&toml).is_ok(),
+                "{field} = {extreme} was rejected"
+            );
+        }
     }
 }
