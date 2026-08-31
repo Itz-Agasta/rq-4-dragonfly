@@ -35,12 +35,93 @@ export interface SourceAges {
 export type EngineState = "STOPPED" | "STARTING" | "RUNNING" | "FAULT";
 
 /**
- * One instant of measured telemetry.
+ * Position of each compared channel in the twin's arrays.
  *
- * Everything here is a measurement or is derived from measurements alone.
- * Nothing is predicted: the twin's output is a separate frame, and keeping them
- * apart at the transport is what makes provenance impossible to get wrong
- * further up.
+ * Mirrors `channels::index` in `twin-core`. The per-cylinder blocks are four
+ * entries each, starting at the constant named.
+ */
+export const TWIN = {
+  RPM: 0,
+  MAP: 1,
+  MAT: 2,
+  MAF: 3,
+  TURBO: 4,
+  TORQUE: 5,
+  FUEL_FLOW: 6,
+  OIL_PRESSURE: 7,
+  OIL_TEMPERATURE: 8,
+  COOLANT: 9,
+  EGT: 10,
+  CHT: 14,
+  LAMBDA: 18,
+} as const;
+
+/**
+ * Subsystems the twin scores, in the order its arrays carry them.
+ *
+ * Mirrors `indices::NAMES` in `twin-core`, by hand and in the same way the frame
+ * is mirrored. Change the order there first.
+ */
+export const SUBSYSTEMS = [
+  "Combustion",
+  "Thermal",
+  "Lubrication",
+  "Air Path",
+  "Fuel/Injection",
+  "Electrical",
+  "Mechanical",
+] as const;
+
+/**
+ * Whether each index is estimated from the physics or read off a threshold.
+ *
+ * Bus voltage and vibration have no counterpart in the engine model, so those two
+ * are ordinary limit checks. The distinction is displayed, never hidden: an
+ * operator must be able to tell an inferred number from a compared one.
+ *
+ * Mirrors `indices::MODEL_BASED` in `twin-core`.
+ */
+export const SUBSYSTEM_INFERRED: readonly boolean[] = [true, true, true, true, true, false, false];
+
+/** What the twin makes of one instant. Mirrors `TwinOutput` in `twin-core`. */
+export interface TwinOutput {
+  /** Whether the innovation has been small enough for long enough. */
+  locked: boolean;
+  /** Root mean square residual against a healthy engine, percent. */
+  rms_pct: number;
+  /** Root mean square innovation, percent. How well the twin is tracking. */
+  innovation_pct: number;
+  /** How hard the engine is being transiented, 0 at steady state. */
+  transient: number;
+  /** What a healthy engine would read on each channel. */
+  predicted: number[];
+  /** Measurement less prediction, in each channel's units. */
+  residual: number[];
+  /** One standard deviation of each residual. */
+  sigma: number[];
+  /** Residual in standard deviations. */
+  normalised: number[];
+  /** Health parameter estimates. */
+  theta: number[];
+  /** One standard deviation of each health parameter. */
+  theta_sigma: number[];
+  /** Subsystem health indices, 0 to 100. */
+  health: number[];
+  /** Name of the quantity that set each index. */
+  health_driver: string[];
+  /** Current value of that quantity. */
+  health_driver_value: number[];
+  /** Value of that quantity at which the subsystem fails. */
+  health_driver_limit: number[];
+}
+
+/**
+ * One instant of measured telemetry, with the twin's reading of it.
+ *
+ * Everything outside `twin` is a measurement or is derived from measurements
+ * alone. The prediction travels in the same frame so a display cannot pair it
+ * with a measurement from a different instant, which is the one way a residual
+ * can be wrong without anything on screen looking wrong.
  */
 export interface Frame {
   /** Monotonic sequence number. A gap means this client fell behind. */
@@ -114,6 +195,9 @@ export interface Frame {
   engine_state: EngineState;
   /** Raw DroneCAN status flag bitmask. */
   flags: number;
+
+  /** The twin's output, or null before it has an estimate. */
+  twin: TwinOutput | null;
 }
 
 /** Connection state, for the shell to render a link indicator. */

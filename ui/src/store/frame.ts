@@ -10,7 +10,7 @@
  */
 
 import { kelvinToCelsius, metresToFeet, msToKnots } from "@/lib/fmt";
-import { CYLINDERS, type Frame, type SourceAges } from "@/lib/telemetry";
+import { CYLINDERS, type Frame, type SourceAges, TWIN } from "@/lib/telemetry";
 
 /** Which bus source last updated a channel. Keys of {@link SourceAges}. */
 export type SourceKey = keyof SourceAges;
@@ -32,6 +32,44 @@ export interface Channel {
 
 const PA_PER_HPA = 100;
 const PA_PER_BAR = 1e5;
+
+/**
+ * A channel carrying what a healthy engine would read on the channel it shadows.
+ *
+ * Registered here rather than reached for inside a chart so it gets a ring buffer
+ * and the store's non-finite guard for free. It is `NaN` until the twin has an
+ * estimate, which the store turns into an unavailable channel rather than a hole
+ * in the trace.
+ */
+function predicted(
+  id: string,
+  label: string,
+  unit: string,
+  dp: number,
+  slot: number,
+  scale = 1,
+): Channel {
+  return {
+    id: `${id}_twin`,
+    label,
+    unit,
+    dp,
+    source: "engine_ms",
+    get: (f: Frame) => (f.twin ? (f.twin.predicted[slot] ?? Number.NaN) * scale : Number.NaN),
+  };
+}
+
+function predictedCylinders(
+  prefix: string,
+  label: string,
+  unit: string,
+  dp: number,
+  base: number,
+): Channel[] {
+  return Array.from({ length: CYLINDERS }, (_, i) =>
+    predicted(`${prefix}${i + 1}`, `${label} ${i + 1}`, unit, dp, base + i),
+  );
+}
 
 function cylinder(
   prefix: string,
@@ -199,6 +237,15 @@ export const CHANNELS: Readonly<Record<string, Channel>> = Object.fromEntries(
     ...cylinder("egt", "EGT", "K", 0, (f) => f.egt_k),
     ...cylinder("cht", "CHT", "K", 0, (f) => f.cht_k),
     ...cylinder("lambda", "λ", "", 2, (f) => f.lambda_k),
+
+    // The twin's prediction of the channels the strips draw. Nothing else is
+    // shadowed: a dashed line is only worth its ink where an operator is being
+    // asked to compare, and six of these already carry the whole fault story.
+    predicted("rpm", "RPM · TWIN", "rpm", 0, TWIN.RPM),
+    predicted("map", "MAP · TWIN", "hPa", 0, TWIN.MAP, 1 / PA_PER_HPA),
+    predicted("oil_p", "OIL PRESSURE · TWIN", "bar", 2, TWIN.OIL_PRESSURE, 1 / PA_PER_BAR),
+    ...predictedCylinders("egt", "EGT · TWIN", "K", 0, TWIN.EGT),
+    ...predictedCylinders("cht", "CHT · TWIN", "K", 0, TWIN.CHT),
   ].map((c) => [c.id, c as Channel]),
 );
 

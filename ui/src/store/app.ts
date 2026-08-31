@@ -111,3 +111,15 @@ export function screenHasUnacknowledged(screen: ScreenId) {
 export function linkIsUp(state: AppState): boolean {
   return state.health?.link_ok === true;
 }
+
+/**
+ * Whether the twin has an estimate it stands behind.
+ *
+ * Read from the polled health rather than from the telemetry frame, which also
+ * carries it. A status light does not need to be right within fifty
+ * milliseconds, and taking it from the frame would mean putting telemetry into
+ * React state to drive one CSS class.
+ */
+export function twinIsLocked(state: AppState): boolean {
+  return state.health?.twin_locked === true;
+}

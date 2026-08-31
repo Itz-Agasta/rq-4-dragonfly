@@ -13,6 +13,7 @@ export interface Health {
   clients: number;
   last_seq: number;
   link_ok: boolean;
+  twin_locked: boolean;
 }
 
 /** How often to ask. Slow: this is a status light, not telemetry. */
