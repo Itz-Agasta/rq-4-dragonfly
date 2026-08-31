@@ -323,6 +323,7 @@ fn condition_flags(reading: &Reading) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fault::Faults;
     use crate::mission::Profile;
     use crate::plant::Plant;
     use crate::sensors::Sensors;
@@ -330,9 +331,9 @@ mod tests {
     fn one_tick() -> (Vec<Frame>, Reading) {
         let condition = Profile::Cruise.condition_at(0.0);
         let mut plant = Plant::new(engine_model::engines::ae330(), &condition);
-        let mut sensors = Sensors::new(1);
+        let mut sensors = Sensors::new(1, Faults::default());
         let outputs = plant.advance(&condition, 0.05);
-        let reading = sensors.sample(&plant.params, &plant.state, &outputs, 0.05);
+        let reading = sensors.sample(&plant.params, &plant.state, &outputs, 0.0, 0.05);
         let mut publisher = Publisher::new(AuxiliaryStatus::DEFAULT_DATA_TYPE_ID);
         let frames = publisher.frames(&plant, &condition, &outputs, &reading, 20);
         (frames, reading)
@@ -367,12 +368,12 @@ mod tests {
     fn the_steady_state_tick_is_thirteen_frames() {
         let condition = Profile::Cruise.condition_at(0.0);
         let mut plant = Plant::new(engine_model::engines::ae330(), &condition);
-        let mut sensors = Sensors::new(1);
+        let mut sensors = Sensors::new(1, Faults::default());
         let mut publisher = Publisher::new(AuxiliaryStatus::DEFAULT_DATA_TYPE_ID);
         let mut counts = Vec::new();
         for _ in 0..20 {
             let outputs = plant.advance(&condition, 0.05);
-            let reading = sensors.sample(&plant.params, &plant.state, &outputs, 0.05);
+            let reading = sensors.sample(&plant.params, &plant.state, &outputs, 0.0, 0.05);
             counts.push(
                 publisher
                     .frames(&plant, &condition, &outputs, &reading, 20)
