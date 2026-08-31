@@ -44,9 +44,6 @@ const PRIORITY_SLOW: u8 = 24;
 /// Usable fuel, m3. **estimated** for the airframe class.
 const TANK_CAPACITY_M3: f64 = 0.350;
 
-/// Rated brake power, W, used only to scale the reported load percentage.
-const RATED_POWER_W: f64 = 132_000.0;
-
 /// Head temperature above which the overheating flag is raised, K.
 /// **estimated**: aluminium head, liquid cooled, above the coolant boiling point
 /// at system pressure.
@@ -134,7 +131,9 @@ impl Publisher {
                 EngineState::Stopped
             },
             flags: condition_flags(reading),
-            engine_load_percent: ((outputs.power_brake_w / RATED_POWER_W * 100.0).round() as i64)
+            engine_load_percent: ((outputs.power_brake_w / plant.params.limits.rated_power_w
+                * 100.0)
+                .round() as i64)
                 .clamp(0, 127) as u8,
             engine_speed_rpm: reading.rpm.max(0.0).round() as u32,
             spark_dwell_time_ms: f32::NAN,
@@ -333,7 +332,7 @@ mod tests {
         let mut plant = Plant::new(engine_model::engines::ae330(), &condition);
         let mut sensors = Sensors::new(1);
         let outputs = plant.advance(&condition, 0.05);
-        let reading = sensors.sample(&plant.state, &outputs, 0.05);
+        let reading = sensors.sample(&plant.params, &plant.state, &outputs, 0.05);
         let mut publisher = Publisher::new(AuxiliaryStatus::DEFAULT_DATA_TYPE_ID);
         let frames = publisher.frames(&plant, &condition, &outputs, &reading, 20);
         (frames, reading)
@@ -373,7 +372,7 @@ mod tests {
         let mut counts = Vec::new();
         for _ in 0..20 {
             let outputs = plant.advance(&condition, 0.05);
-            let reading = sensors.sample(&plant.state, &outputs, 0.05);
+            let reading = sensors.sample(&plant.params, &plant.state, &outputs, 0.05);
             counts.push(
                 publisher
                     .frames(&plant, &condition, &outputs, &reading, 20)

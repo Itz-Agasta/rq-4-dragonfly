@@ -400,6 +400,16 @@
 }
 
 /* the one ambient animation in the product: the TWIN LOCK dot. design.md rule 9. */
+.animate-lockpulse {
+  animation: lockpulse 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-lockpulse {
+    animation: none;
+  }
+}
+
 @keyframes lockpulse {
   0%,
   100% {

@@ -17,10 +17,12 @@
 
 use std::f64::consts::TAU;
 
-use engine_model::{CYLINDERS, Outputs, State};
+use engine_model::{CYLINDERS, EngineParams, Outputs, State};
 
-/// Exhaust thermocouple time constant, s. **estimated** at the middle of the 1
-/// to 3 s range published for a sheathed K-type probe in an exhaust runner.
+/// Exhaust thermocouple time constant, s. **estimated** for a thin sheathed K-type
+/// probe in a small-bore runner, where gas velocity lifts the film coefficient far
+/// above a still-air rating. George & Muthuveerappan, Journal of Aerospace Sciences
+/// and Technologies 71(4), 2023. <https://doi.org/10.61653/joast.v71i4.2019.174>
 const EGT_TAU_S: f64 = 2.0;
 
 /// Cylinder head sensor time constant, s. **estimated**: a head sensor is bonded
@@ -184,7 +186,13 @@ impl Sensors {
     }
 
     /// Sample every channel after `dt` seconds of engine time.
-    pub fn sample(&mut self, state: &State, outputs: &Outputs, dt: f64) -> Reading {
+    pub fn sample(
+        &mut self,
+        params: &EngineParams,
+        state: &State,
+        outputs: &Outputs,
+        dt: f64,
+    ) -> Reading {
         if !self.initialised {
             // Start the lag states on the truth rather than at zero, or the first
             // seconds of every run show a warm-up ramp that is an artefact.
@@ -213,7 +221,7 @@ impl Sensors {
                 self.jitter(self.egt_lagged[i], self.noise.temperature_k * 2.0)
             }),
             lambda: outputs.lambda_cylinder,
-            injection_ms: injection_durations(outputs),
+            injection_ms: injection_durations(params, outputs),
             oil_p_pa: self.jitter(outputs.p_oil, self.noise.oil_pressure_pa),
             oil_t_k: self.jitter(state.t_oil, self.noise.temperature_k),
             coolant_t_k: self.jitter(state.t_coolant, self.noise.temperature_k),
@@ -237,12 +245,18 @@ fn first_order(current: f64, target: f64, tau_s: f64, dt: f64) -> f64 {
 
 /// Injection duration per cylinder, ms.
 ///
-/// A rate-based conversion from injected mass, not a measurement: the engine
-/// model works in milligrams per cycle and the DroneCAN field is a duration.
-/// **estimated** injector flow rate, 1.4 g/s at rail pressure.
-fn injection_durations(outputs: &Outputs) -> [f64; CYLINDERS] {
-    const INJECTOR_G_PER_S: f64 = 1.4;
-    std::array::from_fn(|i| outputs.u_f_cylinder[i] / 1000.0 / INJECTOR_G_PER_S * 1000.0)
+/// A rate-based conversion from injected mass, not a measurement: the engine model
+/// works in milligrams per cycle and the field on the bus is a duration.
+///
+/// Derived from the **commanded** quantity, not the delivered one. A common-rail
+/// controller without per-cylinder feedback cannot know that a nozzle is passing
+/// less than it is asked for, so it holds the same pulse on every cylinder and the
+/// shortfall shows up downstream in exhaust temperature and excess air ratio. A
+/// duration computed from the delivered mass would instead broadcast a fault
+/// signature on a channel that physically cannot carry one.
+fn injection_durations(p: &EngineParams, outputs: &Outputs) -> [f64; CYLINDERS] {
+    let ms = outputs.u_f_mg / p.cylinder.injector_flow_g_per_s;
+    [ms; CYLINDERS]
 }
 
 /// Brake power as a fraction of the rating, clamped, for scaling the vibration.

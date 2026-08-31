@@ -178,7 +178,7 @@ async fn main() -> Result<()> {
             plant.params.cylinder.injector_scale[f.cylinder] = f.scale_at(t_s);
         }
         let outputs = plant.advance(&condition, dt);
-        let reading = sensors.sample(&plant.state, &outputs, dt);
+        let reading = sensors.sample(&plant.params, &plant.state, &outputs, dt);
 
         for frame in publisher.frames(&plant, &condition, &outputs, &reading, PUBLISH_HZ) {
             let id = ExtendedId::new(frame.id()).context("frame identifier exceeds 29 bits")?;

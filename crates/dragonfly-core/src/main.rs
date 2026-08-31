@@ -5,9 +5,12 @@
 //! WebSocket at the rate the engine controller publishes. The frontend bundle is
 //! served from here too, so the demo is a single process plus a browser.
 //!
-//! The twin and the Parquet recorder are not wired in yet. Both attach at the
-//! same seam: every fused frame passes through the broadcast channel, so they
-//! become subscribers rather than changes to the ingest path.
+//! The twin runs inside the ingest loop rather than as a subscriber to the
+//! broadcast channel, because its output belongs in the frame: a consumer that
+//! received a prediction separately could pair it with a measurement from a
+//! different instant, and a residual display built on that would be wrong in a
+//! way nothing on screen would reveal. The Parquet recorder does attach as a
+//! subscriber, because it only reads.
 
 mod ingest;
 mod server;
@@ -20,12 +23,14 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use clap::Parser;
 use dronecan_ice::{AuxiliaryStatus, Message};
+use engine_model::EngineParams;
 use socketcan::{EmbeddedFrame, Id, tokio::CanSocket};
 use tokio::sync::broadcast;
+use twin_core::Twin;
 
 use ingest::{Decoded, Ingest};
 use server::{AppState, LinkStatus};
-use telemetry::{Fusion, STALE_AFTER};
+use telemetry::{Fusion, SLOW_STALE_AFTER, STALE_AFTER};
 
 /// Frames buffered per WebSocket client before it is declared lagged.
 ///
@@ -108,17 +113,23 @@ async fn ingest_loop(
     frames: broadcast::Sender<Arc<telemetry::Frame>>,
     link: Arc<LinkStatus>,
 ) -> Result<()> {
+    // The twin is built per connection rather than per process. A bus that has
+    // been down for seconds has left the estimate describing an engine that has
+    // since moved, and re-seeding from the first frame back costs one millisecond.
+    let params = engine_model::engines::ae330();
     let mut backoff = Duration::from_millis(250);
     loop {
         match CanSocket::open(&iface) {
             Ok(socket) => {
                 backoff = Duration::from_millis(250);
-                if let Err(error) = pump(&socket, auxiliary_data_type_id, &frames, &link).await {
+                if let Err(error) =
+                    pump(&socket, auxiliary_data_type_id, &frames, &link, &params).await
+                {
                     tracing::warn!(%error, "CAN read failed, reopening");
                 }
             }
             Err(error) => {
-                link.record(0, false);
+                link.record(0, false, false);
                 tracing::warn!(%error, iface = %iface, "cannot open interface, is `just can` done?");
             }
         }
@@ -132,9 +143,11 @@ async fn pump(
     auxiliary_data_type_id: u16,
     frames: &broadcast::Sender<Arc<telemetry::Frame>>,
     link: &LinkStatus,
+    params: &EngineParams,
 ) -> Result<()> {
     let mut ingest = Ingest::new(auxiliary_data_type_id);
     let mut fusion = Fusion::new();
+    let mut twin = Twin::new(params.clone());
     let mut logged = Instant::now();
 
     loop {
@@ -168,9 +181,32 @@ async fn pump(
             publish = true;
         }
 
-        if publish && let Some(frame) = fusion.frame(now) {
+        if publish && let Some(mut frame) = fusion.frame(now) {
             let stale = !frame.link_ok;
-            link.record(frame.seq, frame.link_ok);
+            // `link_ok` covers only the engine controller, and a silent auxiliary
+            // or air-data node would feed the estimator the same frozen reading
+            // every frame, which reads as an engine that stopped where it stopped
+            // talking. Power is left out on purpose: bus voltage is not a filter
+            // channel, so a dead voltmeter costs the one health index that
+            // `Frame::measurement` blanks, not the whole twin.
+            let measurement_fresh = frame.link_ok
+                && frame.ages.auxiliary_ms < STALE_AFTER.as_millis() as u64
+                && frame.ages.air_data_ms < SLOW_STALE_AFTER.as_millis() as u64;
+
+            if measurement_fresh {
+                match twin.update(&frame.measurement(params.limits.rated_power_w)) {
+                    // Attached only to the frame it was computed from. Carrying
+                    // the last estimate forward would present an old diagnosis
+                    // as synchronised with a measurement the twin never saw.
+                    Ok(Some(output)) => frame.twin = Some(output.clone()),
+                    Ok(None) => {}
+                    Err(error) => tracing::warn!(%error, "twin lost its estimate, re-seeding"),
+                }
+            }
+            // Read back out of the frame rather than off the twin, so the link
+            // status cannot claim a lock for a frame that carries no estimate.
+            let locked = frame.twin.as_ref().is_some_and(|t| t.locked);
+            link.record(frame.seq, frame.link_ok, locked);
             // A send with no subscribers is not an error; the core runs whether
             // or not anyone is watching, and the recorder will attach here too.
             let _ = frames.send(Arc::new(frame));

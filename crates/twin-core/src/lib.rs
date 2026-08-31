@@ -10,3 +10,13 @@
 //! Never a black-box score: an operator must be able to ask why Lubrication is 61
 //! and get an answer in engineering units.
 #![forbid(unsafe_code)]
+
+pub mod channels;
+pub mod health;
+pub mod indices;
+pub mod nominal;
+pub mod twin;
+pub mod ukf;
+
+pub use channels::Measurement;
+pub use twin::{Tuning, Twin, TwinOutput};

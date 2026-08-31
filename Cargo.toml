@@ -30,6 +30,13 @@ missing_docs = "warn"
 # no todo lint: the build is stubs for two weeks and just check runs -D warnings
 dbg_macro = "warn"
 
+# The twin's tests integrate a stiff engine model through a 57-point unscented
+# transform for hundreds of simulated seconds. Unoptimised that is three minutes,
+# which is long enough that the gate stops being run; optimised it is seventeen
+# seconds. Debug info is kept, so a failing assertion still names its line.
+[profile.test]
+opt-level = 2
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

@@ -533,6 +533,7 @@ dependencies = [
  "clap",
  "dronecan-ice",
  "engine-model",
+ "futures-util",
  "parquet",
  "prognostics",
  "rmp-serde",

@@ -26,7 +26,19 @@ function cylinderSeries(prefix: string, focus: number): StripSeries[] {
   const others = Array.from({ length: CYLINDERS }, (_, i) => i + 1)
     .filter((n) => n !== focus)
     .map((n) => ({ id: `${prefix}${n}`, emphasis: "ghost" as const }));
-  return [...others, { id: `${prefix}${focus}`, emphasis: "measured" as const }];
+  // Only the focused cylinder gets a twin trace. Four dashed lines that lie on
+  // top of each other until one cylinder departs is four times the ink for the
+  // same information, and it buries the pair an operator is being asked to read.
+  //
+  // Predicted is drawn last, so it lands on top. Underneath it is invisible
+  // wherever the twin is locked, because a 2px measured trace covers a 1.5px line
+  // at the same height completely; the strip would then promise a comparison and
+  // show one line. Dashed over solid is legible whether they agree or not.
+  return [
+    ...others,
+    { id: `${prefix}${focus}`, emphasis: "measured" as const },
+    { id: `${prefix}${focus}_twin`, emphasis: "predicted" as const },
+  ];
 }
 
 /**
@@ -60,9 +72,12 @@ function spreadAlarm(pick: (f: Frame) => number[], cylinder: number) {
  */
 const EGT_SERIES = cylinderSeries("egt", FAULT_CYLINDER);
 const CHT_SERIES = cylinderSeries("cht", FAULT_CYLINDER);
-const RPM_SERIES: StripSeries[] = [{ id: "rpm" }];
-const MAP_SERIES: StripSeries[] = [{ id: "map" }];
-const OIL_SERIES: StripSeries[] = [{ id: "oil_p" }];
+const RPM_SERIES: StripSeries[] = [{ id: "rpm" }, { id: "rpm_twin", emphasis: "predicted" }];
+const MAP_SERIES: StripSeries[] = [{ id: "map" }, { id: "map_twin", emphasis: "predicted" }];
+const OIL_SERIES: StripSeries[] = [{ id: "oil_p" }, { id: "oil_p_twin", emphasis: "predicted" }];
+// Vibration carries no twin trace, and that is not an omission. Nothing in a mean
+// value engine model produces a crankcase acceleration, so there is no prediction
+// to draw and a dashed line here would be an invention.
 const VIB_SERIES: StripSeries[] = [{ id: "vib" }];
 
 const egtAlarm = spreadAlarm((f) => f.egt_k, FAULT_CYLINDER);

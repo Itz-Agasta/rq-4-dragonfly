@@ -24,6 +24,7 @@ use dronecan_ice::{
     ReciprocatingStatus, StaticPressure, StaticTemperature,
 };
 use serde::Serialize;
+use twin_core::{Measurement, TwinOutput};
 
 /// Number of cylinders reported. Matches the engine model.
 pub const CYLINDERS: usize = 4;
@@ -35,6 +36,15 @@ pub const CYLINDERS: usize = 4;
 /// short enough that an operator sees a dead bus within a glance.
 pub const STALE_AFTER: Duration = Duration::from_millis(250);
 
+/// A source publishing at the 5 Hz ambient rate is stale after this long.
+///
+/// [`STALE_AFTER`] is a single missed message for air data, which is what a
+/// display wants and what a gate must not use: one lost ambient frame would take
+/// the twin off screen. Three periods instead, and the outside air temperature
+/// that holds errs by 0.06 K at the steepest climb any profile flies, against a
+/// 0.8 K instrument sigma on the channel it reaches.
+pub const SLOW_STALE_AFTER: Duration = Duration::from_millis(600);
+
 /// How long ago each source last spoke, ms.
 #[derive(Clone, Copy, Debug, Default, Serialize)]
 pub struct SourceAges {
@@ -44,17 +54,22 @@ pub struct SourceAges {
     pub auxiliary_ms: u64,
     /// Fuel tank status, node 42.
     pub fuel_ms: u64,
-    /// Air data computer, node 43.
+    /// Air data computer, node 43: the oldest of pressure, temperature and
+    /// airspeed. Three separate messages from one node do not go stale
+    /// together, so this is the worst of the three rather than one standing
+    /// in for all.
     pub air_data_ms: u64,
     /// Power module, node 44.
     pub power_ms: u64,
 }
 
-/// One instant of fused telemetry.
+/// One instant of fused telemetry, with the twin's reading of it.
 ///
-/// Every field is a measurement or is derived from measurements alone. Nothing
-/// here comes from the model; the twin's predictions and the residuals are a
-/// separate frame that arrives once the twin exists.
+/// Everything above the `twin` field is a measurement or is derived from
+/// measurements alone. The twin's block is carried in the same frame rather than
+/// published separately so that a consumer cannot pair a prediction with a
+/// measurement from a different instant, which is the one way a residual display
+/// can lie without anything looking wrong.
 #[derive(Clone, Debug, Serialize)]
 pub struct Frame {
     /// Monotonic sequence number. A gap means the consumer fell behind.
@@ -128,6 +143,73 @@ pub struct Frame {
     pub engine_state: &'static str,
     /// Raw status flag bitmask, for a consumer that wants the detail.
     pub flags: u32,
+
+    /// What the twin makes of this instant, or `None` before it has an estimate.
+    pub twin: Option<TwinOutput>,
+}
+
+impl Frame {
+    /// Lay this frame out as the twin's input.
+    ///
+    /// Torque is not on the bus. What is broadcast is engine load as a whole
+    /// percent of the rating, so the torque handed to the twin is that percentage
+    /// turned back into a power and divided by the measured speed. The rounding is
+    /// declared as measurement noise on that channel rather than hidden.
+    #[must_use]
+    pub fn measurement(&self, rated_power_w: f64) -> Measurement {
+        let omega_e = f64::from(self.rpm) * std::f64::consts::TAU / 60.0;
+        let torque_nm = if omega_e > 0.0 {
+            f64::from(self.load_pct) / 100.0 * rated_power_w / omega_e
+        } else {
+            f64::NAN
+        };
+        Measurement {
+            t_s: self.t_s,
+            p_amb_pa: f64::from(self.p_amb_pa),
+            oat_k: f64::from(self.oat_k),
+            ias_m_s: f64::from(self.ias_ms),
+            wastegate: f64::from(self.wastegate),
+            // Every cylinder is commanded the same duration; the mean is taken so a
+            // single dropped cylinder status does not move the fuelling input.
+            injection_ms: mean_finite(&self.injection_ms),
+            rpm: f64::from(self.rpm),
+            map_pa: f64::from(self.map_pa),
+            mat_k: f64::from(self.mat_k),
+            maf_kg_s: f64::from(self.maf_kgs),
+            turbo_rpm: f64::from(self.tc_rpm),
+            torque_nm,
+            fuel_flow_kg_h: f64::from(self.fuel_flow_kgh),
+            oil_p_pa: f64::from(self.oil_p_pa),
+            oil_t_k: f64::from(self.oil_t_k),
+            coolant_t_k: f64::from(self.coolant_t_k),
+            egt_k: std::array::from_fn(|i| f64::from(self.egt_k[i])),
+            cht_k: std::array::from_fn(|i| f64::from(self.cht_k[i])),
+            lambda: std::array::from_fn(|i| f64::from(self.lambda_k[i])),
+            // Blanked when the power module falls silent. Bus voltage is not a
+            // filter channel, so a frozen one can only score the electrical index
+            // as though it were live, and threshold monitoring cannot notice.
+            bus_v: if self.ages.power_ms < SLOW_STALE_AFTER.as_millis() as u64 {
+                f64::from(self.bus_v)
+            } else {
+                f64::NAN
+            },
+            vib_rms_g: f64::from(self.vib_rms_g),
+            vib_kurtosis: f64::from(self.vib_kurtosis),
+        }
+    }
+}
+
+/// Mean of the finite entries, or `NaN` if there are none.
+fn mean_finite(values: &[f32; CYLINDERS]) -> f64 {
+    let (sum, count) = values
+        .iter()
+        .filter(|v| v.is_finite())
+        .fold((0.0f64, 0u32), |(s, n), v| (s + f64::from(*v), n + 1));
+    if count == 0 {
+        f64::NAN
+    } else {
+        sum / f64::from(count)
+    }
 }
 
 /// Holds the last value of every channel and builds frames from them.
@@ -256,7 +338,9 @@ impl Fusion {
                 engine_ms: age_ms(now, Some(*engine_at)),
                 auxiliary_ms: age_ms(now, self.auxiliary.as_ref().map(|(t, _)| *t)),
                 fuel_ms: age_ms(now, self.fuel.as_ref().map(|(t, _)| *t)),
-                air_data_ms: age_ms(now, self.pressure.as_ref().map(|(t, _)| *t)),
+                air_data_ms: age_ms(now, self.pressure.as_ref().map(|(t, _)| *t))
+                    .max(age_ms(now, self.temperature.as_ref().map(|(t, _)| *t)))
+                    .max(age_ms(now, self.airspeed.as_ref().map(|(t, _)| *t))),
                 power_ms: age_ms(now, self.bus.as_ref().map(|(t, _)| *t)),
             },
 
@@ -295,6 +379,7 @@ impl Fusion {
             fuel_remaining_pct: f32::from(fuel.available_fuel_volume_percent),
             engine_state: state_name(status.state),
             flags: status.flags,
+            twin: None,
         })
     }
 }
@@ -413,6 +498,65 @@ mod tests {
         let frame = fusion.frame(Instant::now()).expect("a frame");
         assert!(!frame.link_ok);
         assert!(frame.ages.engine_ms >= 1000);
+    }
+
+    /// Pressure, temperature and airspeed are three separate messages from the
+    /// air data node; one going quiet while the others keep talking must not
+    /// read as fresh.
+    #[test]
+    fn air_data_is_only_as_fresh_as_its_stalest_message() {
+        let mut fusion = Fusion::new();
+        let now = Instant::now();
+        let long_ago = now - Duration::from_secs(1);
+        fusion.engine(now, running_status());
+        fusion.pressure(
+            now,
+            StaticPressure {
+                static_pressure: 42_070.0,
+                static_pressure_variance: 25.0,
+            },
+        );
+        fusion.temperature(
+            long_ago,
+            StaticTemperature {
+                static_temperature: 242.15,
+                static_temperature_variance: 0.25,
+            },
+        );
+        fusion.airspeed(
+            now,
+            IndicatedAirspeed {
+                indicated_airspeed: 40.1,
+                indicated_airspeed_variance: 0.5,
+            },
+        );
+        let frame = fusion.frame(now).expect("a frame");
+        assert!(frame.ages.air_data_ms >= 1000, "{}", frame.ages.air_data_ms);
+    }
+
+    /// A frozen bus voltage would score the electrical health index as though it
+    /// were live, and threshold monitoring has nothing in it to notice the value
+    /// has stopped moving.
+    #[test]
+    fn a_stale_bus_voltage_does_not_reach_the_twin() {
+        let now = Instant::now();
+        let mut fusion = Fusion::new();
+        let volts = CircuitStatus {
+            circuit_id: 1,
+            voltage: 27.8,
+            current: 30.0,
+            error_flags: 0,
+        };
+
+        fusion.engine(now, running_status());
+        fusion.bus(now, volts);
+        let fresh = fusion.frame(now).expect("a frame");
+        assert!(fresh.measurement(132_000.0).bus_v.is_finite());
+
+        fusion.bus(now - SLOW_STALE_AFTER, volts);
+        let stale = fusion.frame(now).expect("a frame");
+        assert_eq!(stale.bus_v, 27.8, "the frame keeps the reading and its age");
+        assert!(stale.measurement(132_000.0).bus_v.is_nan());
     }
 
     /// `u64::MAX` does not survive MessagePack into a JavaScript number, so a

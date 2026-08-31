@@ -22,7 +22,7 @@ import { channel } from "@/store/frame";
 import { HISTORY_SECONDS, telemetry } from "@/store/telemetry";
 
 /** How a series is drawn. Weight and dash, never hue. */
-export type Emphasis = "measured" | "ghost" | "accent";
+export type Emphasis = "measured" | "ghost" | "accent" | "predicted";
 
 export interface StripSeries {
   /** Channel id, as registered in the channel registry. */
@@ -74,10 +74,16 @@ function token(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-const STROKE: Record<Emphasis, { token: string; width: number }> = {
+/**
+ * Measured is solid and bright, predicted is dashed and dim. The separation is
+ * weight and dash and never hue, so it survives being printed, screenshotted or
+ * looked at by someone who cannot tell two colours apart.
+ */
+const STROKE: Record<Emphasis, { token: string; width: number; dash?: number[] }> = {
   measured: { token: "--measured", width: 2 },
   ghost: { token: "--trace-ghost", width: 1.25 },
   accent: { token: "--primary", width: 2 },
+  predicted: { token: "--predicted", width: 1.5, dash: [4, 3] },
 };
 
 /** Vertical fraction of the plot the trace is allowed to fill. */
@@ -147,6 +153,7 @@ export function Strip({ title, readout, series, syncKey, minSpan, alarmWhen }: S
             return {
               stroke: token(style.token),
               width: style.width,
+              dash: style.dash,
               points: { show: false },
             };
           }),

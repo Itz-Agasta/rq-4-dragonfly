@@ -1,12 +1,15 @@
 /**
  * Authored values for the parts of OPS that nothing computes yet.
  *
- * MOCK: every export here is replaced by real output. The subsystem health
- * indices and the alert stack come from the twin's health-parameter estimates;
- * the advisory's diagnosis, remaining useful life and risk come from the
- * diagnosis and prognosis layers. Nothing here is a *measurement* — the strips,
- * the schematic callouts and the mission bar are all live off the bus — so
- * removing this file removes authored judgements, not authored physics.
+ * MOCK: every export here is replaced by real output. The alert stack comes from
+ * real residual excursions once there is a rule that raises them; the advisory's
+ * diagnosis, remaining useful life and risk come from the diagnosis and prognosis
+ * layers. Nothing here is a *measurement*: the strips, the schematic callouts,
+ * the mission bar and now the health rail are all live, so removing this file
+ * removes authored judgements, not authored physics.
+ *
+ * The subsystem health indices used to live here and no longer do: they are the
+ * twin's, read from the frame inside the render loop.
  *
  * The numbers are not arbitrary. They serve one story: a single degrading
  * subsystem, injector coking on cylinder 3, with everything else quiet. Exactly
@@ -15,25 +18,6 @@
  */
 
 import type { Alert } from "@/store/app";
-
-export interface Subsystem {
-  name: string;
-  /** Health index, 0 to 100. */
-  value: number;
-  /** The one degrading subsystem. At most one of these is true. */
-  degrading?: boolean;
-}
-
-/** MOCK: replaced by the twin's per-subsystem health indices. */
-export const SUBSYSTEMS: readonly Subsystem[] = [
-  { name: "Combustion", value: 94 },
-  { name: "Thermal", value: 91 },
-  { name: "Lubrication", value: 88 },
-  { name: "Air Path", value: 96 },
-  { name: "Fuel/Injection", value: 72, degrading: true },
-  { name: "Electrical", value: 99 },
-  { name: "Mechanical", value: 93 },
-];
 
 /**
  * MOCK: replaced by real residual excursions.
@@ -48,7 +32,7 @@ export const ALERTS: readonly Alert[] = [
     t_s: 15_128, // T+04:12:08
     severity: "caution",
     subsystem: "FUEL/INJECTION",
-    message: "EGT cyl-3 residual −48 K, exceeds 3σ",
+    message: "EGT cyl-3 residual −67 K, exceeds 3σ",
     screen: "analysis",
   },
   {
