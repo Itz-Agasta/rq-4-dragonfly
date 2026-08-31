@@ -11,15 +11,44 @@
 //! coefficients, which are carried as absolute coefficients because that is the
 //! number an injector is specified and rejected against.
 //!
-//! # What is deliberately not estimated
+//! # Per-cylinder combustion efficiency is not estimated, and it was tried
 //!
-//! Per-cylinder combustion efficiency. It is identifiable in principle, since a
-//! restricted injector delivers less fuel and so raises that cylinder's excess air
-//! ratio, whereas poor combustion at the same fuelling leaves it unchanged, and
-//! per-cylinder excess air ratio is measured, but nothing in the current fault set
-//! moves it. Every additional parameter is another way for the filter to explain a
-//! residual, so one that no known mechanism drives weakens the isolation of the ones
-//! that do.
+//! Misfire moves it, so `plan.md` 7 and an earlier note here both expected it to join
+//! this list once a misfire fault existed. It was added, measured and removed again,
+//! and the measurement is recorded here because the argument for adding it is
+//! persuasive and wrong.
+//!
+//! A restricted nozzle and a misfiring cylinder are the same fault on every
+//! per-cylinder channel: both run that cylinder cool and lean, drop its head
+//! temperature and cost torque. The only thing that separates them is **total fuel
+//! flow**, because fuel a nozzle never passes never leaves the tank while fuel that
+//! is injected and not burnt does. That is one scalar measurement against four
+//! per-cylinder delivery unknowns, so three directions of the pair are not
+//! observable at all, and a filter carrying both wanders along them.
+//!
+//! Measured, on the same 400 s cruise, with fourteen parameters against ten:
+//!
+//! | | healthy innovation | healthy injector-3 | coked injector-3 |
+//! | --- | --- | --- | --- |
+//! | ten | 0.312% | 0.9628 | **0.8129** |
+//! | fourteen | 0.438% | **1.0000, at its bound** | 0.8541 |
+//!
+//! The plant is at 0.8114, so carrying the extra parameters took the estimate of the
+//! *demonstration fault* from 0.2% error to 5.3%, and left a healthy engine reading
+//! 4.5% down on combustion with its injector pinned. It bought a correct misfire
+//! attribution and paid for it with the fault the whole build is arranged around.
+//!
+//! What detects misfire instead is the innovation: the filter cannot explain it, so
+//! it stays unexplained at **1.32%** against 0.31% healthy, and
+//! [`crate::indices::evaluate`] scores it from the per-cylinder dispersion. What
+//! separates it from coking is the fuel-flow residual, **-2.88 sigma against -0.02**,
+//! which is a residual pattern and belongs to the diagnosis layer rather than to a
+//! parameter. Adding a parameter for every fault is not the goal; a fault with no
+//! parameter is still diagnosable and sometimes only diagnosable that way.
+//!
+//! Do not re-add these four without a second measurement of delivered fuel. A
+//! per-cylinder flow or injector current would make them identifiable and nothing on
+//! this bus is one.
 
 use engine_model::{CYLINDERS, EngineParams};
 

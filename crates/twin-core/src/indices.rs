@@ -169,12 +169,20 @@ fn worst_parameter(health: &Health, members: &[usize]) -> Scored {
 
 /// Combustion quality, from what the health parameters could not explain.
 ///
-/// The filter already absorbs a restricted injector into that injector's discharge
-/// coefficient, so a coked nozzle leaves the per-cylinder residuals flat and this
+/// The filter absorbs a restricted injector into that injector's discharge
+/// coefficient, so a coked nozzle leaves the per-cylinder innovations flat and this
 /// index high, which is correct: the fuel system is degraded and combustion is not.
-/// What it does catch is a cylinder whose exhaust and excess air ratio disagree with
-/// its neighbours in a way no injector estimate can account for, which is the
-/// signature of misfire and of cyclic variability.
+/// What it catches is a cylinder whose exhaust and excess air ratio disagree with
+/// its neighbours in a way no estimate can account for, which is misfire and cyclic
+/// variability.
+///
+/// Misfire is scored here rather than from a parameter of its own **on purpose**,
+/// and `crate::health` has the measurement behind that: a per-cylinder combustion
+/// efficiency is not identifiable against one total fuel flow, and carrying it cost
+/// more on the injector estimates than it bought. The consequence to know is that
+/// the filter also spends injector and turbine efficiency partly explaining a
+/// misfire, so the rail names more than one subsystem for it. Telling misfire from
+/// coking is a residual pattern, not an index.
 fn combustion(unexplained: &[f64]) -> Scored {
     let dispersion = |base: usize| -> f64 {
         let mean: f64 =
