@@ -5,35 +5,30 @@
 //! Swapping to hardware is a change of interface name, and it means the CAN rig
 //! can be built in parallel without touching this code.
 //!
-//! Faults are physically grounded parameter perturbations inside `engine-model`,
-//! never signal-level hacks. That is what makes residual-based diagnosis actually
-//! work instead of merely appearing to. Injector coking acts on
-//! `cylinder.injector_scale`; see `fault`.
+//! Engine faults are physically grounded parameter perturbations inside
+//! `engine-model`, never signal-level hacks. That is what makes residual-based
+//! diagnosis actually work instead of merely appearing to. The two instrument
+//! faults are the deliberate exception and the reason the rule is worth stating;
+//! see `fault`.
 //!
 //! The whole run is a function of the seed and the profile. Nothing reads the
 //! wall clock except the pacing, so two runs with the same arguments put the
 //! same bytes on the bus, which is what makes a recorded mission replayable and
 //! a reported problem reproducible.
 
-mod fault;
-mod mission;
-mod plant;
-mod publish;
-mod sensors;
-
 use std::time::Duration;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result};
 use clap::Parser;
 use dronecan_ice::{AuxiliaryStatus, Message};
 use socketcan::{EmbeddedFrame, ExtendedId, tokio::CanSocket};
 use tokio::time::{MissedTickBehavior, interval};
 
-use fault::InjectorCoking;
-use mission::Profile;
-use plant::Plant;
-use publish::Publisher;
-use sensors::Sensors;
+use dragonfly_sim::fault::FaultArgs;
+use dragonfly_sim::mission::Profile;
+use dragonfly_sim::plant::Plant;
+use dragonfly_sim::publish::Publisher;
+use dragonfly_sim::sensors::Sensors;
 
 /// Telemetry rate, Hz. The engine integrates at 200 Hz underneath this.
 const PUBLISH_HZ: u64 = 20;
@@ -66,51 +61,8 @@ struct Args {
     #[arg(long)]
     duration: Option<f64>,
 
-    /// Cylinder to coke the injector on, 1 to 4. Healthy if unset.
-    #[arg(long, value_parser = clap::value_parser!(u8).range(1..=4))]
-    fault_cylinder: Option<u8>,
-
-    /// Simulated seconds before the injector fault begins.
-    #[arg(long, default_value_t = 90.0)]
-    fault_onset: f64,
-
-    /// Simulated seconds the fault takes to reach its settled severity.
-    #[arg(long, default_value_t = 240.0)]
-    fault_ramp: f64,
-
-    /// Injector flow scale the fault settles at, as a fraction of nominal.
-    #[arg(long, default_value_t = 0.84)]
-    fault_scale: f64,
-}
-
-/// Reject fault arguments the injector model cannot honour.
-///
-/// clap has ranged parsers for integers only, and these are the arguments that
-/// otherwise fail quietly rather than loudly: a negative ramp clamps the growth
-/// to zero and a scale of 1.0 or more never removes any fuel, so either one
-/// publishes a healthy engine for a run whose command line says a fault was
-/// injected. Non-finite values are worse still, propagating through the state
-/// integration until every channel on the bus is NaN.
-fn validate_fault(args: &Args) -> Result<()> {
-    if args.fault_cylinder.is_none() {
-        return Ok(());
-    }
-    ensure!(
-        args.fault_onset.is_finite() && args.fault_onset >= 0.0,
-        "--fault-onset is a simulated time in seconds, so it must be finite and not negative, got {}",
-        args.fault_onset
-    );
-    ensure!(
-        args.fault_ramp.is_finite() && args.fault_ramp >= 0.0,
-        "--fault-ramp is a duration in seconds, so it must be finite and not negative, got {}. Use 0 for a step change.",
-        args.fault_ramp
-    );
-    ensure!(
-        args.fault_scale.is_finite() && (0.0..1.0).contains(&args.fault_scale),
-        "--fault-scale is the fraction of nominal injector flow the fault settles at, so it must be at least 0.0 and below 1.0 to remove any fuel at all, got {}",
-        args.fault_scale
-    );
-    Ok(())
+    #[command(flatten)]
+    faults: FaultArgs,
 }
 
 #[tokio::main]
@@ -123,21 +75,17 @@ async fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
-    validate_fault(&args)?;
+    let faults = args.faults.build()?;
     let socket = CanSocket::open(&args.iface)
         .with_context(|| format!("opening CAN interface {}, is `just can` done?", args.iface))?;
 
-    let params = engine_model::engines::ae330();
-    let engine_name = params.name.clone();
+    // The engine as delivered, kept beside the one being flown: every fault
+    // severity is a multiple of a value in here, so it must not itself degrade.
+    let base = engine_model::engines::ae330();
+    let engine_name = base.name.clone();
     let mut condition = args.profile.condition_at(0.0);
-    let mut plant = Plant::new(params, &condition);
-    let mut sensors = Sensors::new(args.seed);
-    let injector_fault = args.fault_cylinder.map(|c| InjectorCoking {
-        cylinder: usize::from(c - 1),
-        onset_s: args.fault_onset,
-        ramp_s: args.fault_ramp,
-        final_scale: args.fault_scale,
-    });
+    let mut plant = Plant::new(base.clone(), &condition);
+    let mut sensors = Sensors::new(args.seed, faults);
     let mut publisher = Publisher::new(args.aux_dtid);
 
     tracing::info!(
@@ -146,7 +94,7 @@ async fn main() -> Result<()> {
         profile = ?args.profile,
         speed = args.speed,
         seed = args.seed,
-        fault = ?injector_fault.map(|f| (f.cylinder + 1, f.onset_s, f.final_scale)),
+        fault = %args.faults.summary(),
         "publishing at {PUBLISH_HZ} Hz"
     );
 
@@ -172,13 +120,9 @@ async fn main() -> Result<()> {
         }
 
         condition = args.profile.condition_at(t_s);
-        // Applied before the step, so the engine integrates with the degraded
-        // parameter rather than one step behind it.
-        if let Some(f) = injector_fault {
-            plant.params.cylinder.injector_scale[f.cylinder] = f.scale_at(t_s);
-        }
+        faults.apply(&mut plant.params, &base, t_s);
         let outputs = plant.advance(&condition, dt);
-        let reading = sensors.sample(&plant.params, &plant.state, &outputs, dt);
+        let reading = sensors.sample(&plant.params, &plant.state, &outputs, t_s, dt);
 
         for frame in publisher.frames(&plant, &condition, &outputs, &reading, PUBLISH_HZ) {
             let id = ExtendedId::new(frame.id()).context("frame identifier exceeds 29 bits")?;
@@ -216,51 +160,47 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
 
-    /// `try_parse_from`, not `parse_from`: the latter exits the process on a
-    /// parse error, which takes the whole test binary with it.
-    fn args(extra: &[&str]) -> Args {
-        let mut argv = vec!["dragonfly-sim"];
-        argv.extend_from_slice(extra);
-        Args::try_parse_from(argv).expect("arguments should parse")
-    }
-
-    /// The failure this guards is silent, not loud: `scale_at` clamps a negative
-    /// ramp to zero progress and publishes a nominal engine, so the run looks
-    /// healthy while the command line says otherwise.
+    /// clap panics at startup rather than failing to compile when a flattened
+    /// group collides with the parser it is flattened into, so the whole surface
+    /// is asserted here. `fault` owns the tests for what the severities mean.
     #[test]
-    fn a_ramp_that_would_disable_the_fault_is_rejected() {
-        assert!(validate_fault(&args(&["--fault-cylinder", "3", "--fault-ramp=-1"])).is_err());
-    }
+    fn the_whole_command_line_parses_with_the_fault_group_flattened() {
+        Args::command().debug_assert();
 
-    #[test]
-    fn a_scale_that_would_add_fuel_is_rejected() {
-        assert!(validate_fault(&args(&["--fault-cylinder", "3", "--fault-scale", "1.2"])).is_err());
-    }
+        let args = Args::try_parse_from([
+            "dragonfly-sim",
+            "--profile",
+            "high-altitude",
+            "--fault-cylinder",
+            "3",
+            "--misfire-cylinder",
+            "1",
+            "--cooling-fault",
+            "--drift-cylinder",
+            "2",
+            "--freeze-cylinder",
+            "4",
+        ])
+        .expect("arguments should parse");
 
-    #[test]
-    fn non_finite_is_rejected_before_it_reaches_the_integrator() {
-        assert!(validate_fault(&args(&["--fault-cylinder", "3", "--fault-scale", "nan"])).is_err());
-    }
-
-    /// The extreme of the same fault, not a different one. `--fault-scale 0` is a
-    /// totally blocked injector, and the model already answers for it: `lambda`
-    /// returns infinity on zero fuel and `indicated_efficiency` reads a non-finite
-    /// lambda as zero equivalence ratio.
-    #[test]
-    fn a_totally_blocked_injector_is_allowed() {
-        assert!(validate_fault(&args(&["--fault-cylinder", "3", "--fault-scale", "0"])).is_ok());
+        let faults = args.faults.build().expect("severities should be accepted");
+        assert!(faults.injector.is_some());
+        assert!(faults.misfire.is_some());
+        assert!(faults.cooling.is_some());
+        assert!(faults.drift.is_some());
+        assert!(faults.freeze.is_some());
     }
 
     #[test]
-    fn defaults_describe_the_demonstration_fault() {
-        assert!(validate_fault(&args(&["--fault-cylinder", "3"])).is_ok());
-    }
-
-    /// Without a cylinder there is no fault, so the other three arguments are
-    /// inert and rejecting them would fail a healthy run for no reason.
-    #[test]
-    fn fault_arguments_are_inert_on_a_healthy_run() {
-        assert!(validate_fault(&args(&["--fault-scale", "9"])).is_ok());
+    fn a_bare_command_line_is_a_healthy_engine() {
+        let args = Args::try_parse_from(["dragonfly-sim"]).expect("arguments should parse");
+        let faults = args.faults.build().expect("healthy is valid");
+        assert!(faults.injector.is_none());
+        assert!(faults.misfire.is_none());
+        assert!(faults.cooling.is_none());
+        assert!(faults.drift.is_none());
+        assert!(faults.freeze.is_none());
     }
 }

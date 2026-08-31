@@ -10,7 +10,6 @@ anyhow.workspace = true
 clap.workspace = true
 dronecan-ice.workspace = true
 engine-model.workspace = true
-rand = "0.10.2"
 socketcan.workspace = true
 tokio.workspace = true
 tracing.workspace = true

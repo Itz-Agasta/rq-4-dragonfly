@@ -45,11 +45,15 @@ can:
     sudo ip link add dev vcan0 type vcan || true
     sudo ip link set up vcan0
 
-sim:
-    cargo run -p dragonfly-sim
+# release, not debug. in debug the UKF step takes most of the 50 ms frame budget,
+# blocks the CAN read loop, and the socket buffer overflows: measured 105 of 400
+# frames carrying no twin, against 0 of 400 on release. it looks like a stale-gate
+# problem and is not one.
+sim *args:
+    cargo run --release -p dragonfly-sim -- {{args}}
 
-core:
-    cargo run -p dragonfly-core
+core *args:
+    cargo run --release -p dragonfly-core -- {{args}}
 
 ui:
     pnpm -F ui dev

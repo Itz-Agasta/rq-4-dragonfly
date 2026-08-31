@@ -19,6 +19,8 @@ use std::f64::consts::TAU;
 
 use engine_model::{CYLINDERS, EngineParams, Outputs, State};
 
+use crate::fault::Faults;
+
 /// Exhaust thermocouple time constant, s. **estimated** for a thin sheathed K-type
 /// probe in a small-bore runner, where gas velocity lifts the film coefficient far
 /// above a still-air rating. George & Muthuveerappan, Journal of Aerospace Sciences
@@ -47,6 +49,15 @@ const BATTERY_V: f64 = 24.8;
 const VIBRATION_RATE_HZ: f64 = 2000.0;
 /// Samples retained for the statistics, half a second at the internal rate.
 const VIBRATION_WINDOW: usize = 1024;
+
+/// Per-sample decay of a missing combustion impulse.
+///
+/// 0.80 at 2 kHz is a 2.5 ms time constant, which is roughly what a combustion
+/// event lasts: 40 to 60 crank degrees, or 2 to 3 ms at 3,720 rpm. It has to be
+/// about that and not about a cycle. One engine cycle here is 32 ms, and a deficit
+/// decaying over that long stops being an impulse and becomes a half-order tone,
+/// which is a different signal with different statistics.
+const MISFIRE_DECAY: f64 = 0.80;
 
 /// A reproducible generator.
 ///
@@ -168,29 +179,39 @@ pub struct Sensors {
     egt_lagged: [f64; CYLINDERS],
     cht_lagged: [f64; CYLINDERS],
     vibration: VibrationChannel,
+    faults: Faults,
+    frozen_egt: Option<f64>,
     initialised: bool,
 }
 
 impl Sensors {
     /// Instruments seeded for a reproducible run.
+    ///
+    /// The fault set comes in here rather than being applied by the caller because
+    /// a frozen channel is a state: the held value is whatever the instrument last
+    /// reported, which only this module knows.
     #[must_use]
-    pub fn new(seed: u64) -> Self {
+    pub fn new(seed: u64, faults: Faults) -> Self {
         Self {
             rng: Rng::new(seed),
             noise: NoiseLevels::default(),
             egt_lagged: [0.0; CYLINDERS],
             cht_lagged: [0.0; CYLINDERS],
             vibration: VibrationChannel::new(Rng::new(seed ^ 0xA5A5_A5A5)),
+            faults,
+            frozen_egt: None,
             initialised: false,
         }
     }
 
-    /// Sample every channel after `dt` seconds of engine time.
+    /// Sample every channel at simulated time `t_s`, after `dt` seconds of engine
+    /// time.
     pub fn sample(
         &mut self,
         params: &EngineParams,
         state: &State,
         outputs: &Outputs,
+        t_s: f64,
         dt: f64,
     ) -> Reading {
         if !self.initialised {
@@ -207,7 +228,15 @@ impl Sensors {
 
         let rpm = state.rpm();
         let load = fraction_of_full_load(outputs);
-        self.vibration.advance(rpm, load, dt);
+        let misfire_rate = self
+            .faults
+            .misfire
+            .map_or(0.0, |m| 1.0 - m.efficiency_at(t_s));
+        self.vibration.advance(rpm, load, misfire_rate, dt);
+
+        let egt_k = std::array::from_fn(|i| {
+            self.jitter(self.egt_lagged[i], self.noise.temperature_k * 2.0)
+        });
 
         Reading {
             rpm: self.jitter(rpm, self.noise.rpm),
@@ -217,9 +246,7 @@ impl Sensors {
             cht_k: std::array::from_fn(|i| {
                 self.jitter(self.cht_lagged[i], self.noise.temperature_k)
             }),
-            egt_k: std::array::from_fn(|i| {
-                self.jitter(self.egt_lagged[i], self.noise.temperature_k * 2.0)
-            }),
+            egt_k: self.instrument_faults(egt_k, t_s),
             lambda: outputs.lambda_cylinder,
             injection_ms: injection_durations(params, outputs),
             oil_p_pa: self.jitter(outputs.p_oil, self.noise.oil_pressure_pa),
@@ -234,6 +261,14 @@ impl Sensors {
 
     fn jitter(&mut self, value: f64, sigma: f64) -> f64 {
         sigma.mul_add(self.rng.normal(), value)
+    }
+
+    /// Apply the instrument faults. `fault::Faults::corrupt_exhaust` owns the
+    /// behaviour so the acceptance tests exercise the same code the bus does.
+    fn instrument_faults(&mut self, mut egt_k: [f64; CYLINDERS], t_s: f64) -> [f64; CYLINDERS] {
+        self.faults
+            .corrupt_exhaust(&mut egt_k, &mut self.frozen_egt, t_s);
+        egt_k
     }
 }
 
@@ -286,12 +321,27 @@ fn bus_voltage(rpm: f64) -> f64 {
 /// the harmonics above it are what a combustion fault modulates.
 ///
 /// It carries no bearing defect frequencies and no envelope spectrum: those come
-/// with the fault library, and until they do this channel can show a load trend
-/// but cannot show a bearing.
+/// with a bearing fault, and until one exists this channel can show a load trend
+/// and a misfire but cannot show a bearing.
+///
+/// The misfire term is the one fault signature synthesised here rather than
+/// inherited from the physics, and it has to be, because a mean value model has no
+/// individual cycles to disturb. A four-stroke cylinder fires once every two
+/// revolutions, so one cylinder failing to ignite removes one impulse at **half
+/// engine order** and its harmonics; that is the feature published misfire
+/// detectors key on, whether they read it off crankshaft speed, instantaneous
+/// torque or the block. The deficit is drawn per firing rather than applied as a
+/// steady sub-harmonic, so it is impulsive and moves kurtosis before it moves RMS.
+///
+/// Gao, Zhang, Cao et al., "Simulation study on multi-mode misfire fault of diesel
+/// engine", 2025: single-cylinder misfire is localised from the amplitude and phase
+/// of the 0.5th order alone. <https://doi.org/10.1049/icp.2025.3373>
 #[derive(Debug)]
 struct VibrationChannel {
     rng: Rng,
     phase: f64,
+    cycle_phase: f64,
+    deficit: f64,
     samples: Vec<f64>,
     cursor: usize,
 }
@@ -301,27 +351,50 @@ impl VibrationChannel {
         Self {
             rng,
             phase: 0.0,
+            cycle_phase: 0.0,
+            deficit: 0.0,
             samples: vec![0.0; VIBRATION_WINDOW],
             cursor: 0,
         }
     }
 
-    fn advance(&mut self, rpm: f64, load: f64, dt: f64) {
+    /// Advance the signal, with `misfire_rate` the fraction of one cylinder's
+    /// firings that fail.
+    fn advance(&mut self, rpm: f64, load: f64, misfire_rate: f64, dt: f64) {
         // Amplitudes are **estimated**: 0.8 g at idle rising to about 2.4 g at
         // the rating, which is the order of magnitude quoted for a four-cylinder
         // diesel measured on the crankcase.
         let amplitude = 0.8f64.mul_add(1.0, 1.6 * load);
         let fundamental = 2.0 * rpm / 60.0;
+        // Half engine order: the rate at which any one cylinder gets its turn.
+        let cycle = fundamental / 4.0;
         let count = ((dt * VIBRATION_RATE_HZ).round() as usize).min(VIBRATION_WINDOW);
 
         for _ in 0..count {
             self.phase = (self.phase + fundamental / VIBRATION_RATE_HZ).fract();
+            let next_cycle = self.cycle_phase + cycle / VIBRATION_RATE_HZ;
+            if next_cycle >= 1.0 {
+                // One firing of the affected cylinder has come round. Draw whether
+                // it lit; a failure leaves a deficit that decays over roughly the
+                // duration of the combustion event that did not happen.
+                self.deficit = if self.rng.uniform() < misfire_rate {
+                    amplitude
+                } else {
+                    0.0
+                };
+            }
+            self.cycle_phase = next_cycle.fract();
+            self.deficit *= MISFIRE_DECAY;
+
             let theta = TAU * self.phase;
             let tone = 0.30f64.mul_add(
                 (3.0 * theta).sin(),
                 0.55f64.mul_add((2.0 * theta).sin(), theta.sin()),
             );
-            let sample = amplitude.mul_add(tone, 0.35 * self.rng.normal());
+            let sample = self.deficit.mul_add(
+                -theta.sin(),
+                amplitude.mul_add(tone, 0.35 * self.rng.normal()),
+            );
             self.samples[self.cursor] = sample;
             self.cursor = (self.cursor + 1) % VIBRATION_WINDOW;
         }
@@ -393,12 +466,51 @@ mod tests {
     fn the_vibration_channel_produces_plausible_statistics() {
         let mut vib = VibrationChannel::new(Rng::new(3));
         for _ in 0..40 {
-            vib.advance(3720.0, 0.35, 0.05);
+            vib.advance(3720.0, 0.35, 0.0, 0.05);
         }
         let rms = vib.rms();
         assert!((0.5..6.0).contains(&rms), "{rms} g RMS");
         let kurtosis = vib.kurtosis();
         assert!((1.0..3.0).contains(&kurtosis), "{kurtosis}");
+    }
+
+    /// The direction of the misfire signature, which is the part that is real.
+    ///
+    /// Kurtosis rises while RMS does not, and that ordering is the classical early
+    /// indicator: a few large excursions move a fourth moment before they move a
+    /// second one. Here RMS actually falls, because removing a combustion event
+    /// removes energy from the signal, which is the right sign for the wrong reason
+    /// and is worth knowing when reading the channel.
+    ///
+    /// **Only the direction is asserted, because only the direction is earned.**
+    /// The magnitudes are small, about +2% on kurtosis at a 20% misfire rate,
+    /// because this channel is a synthesised sum of tones with no per-cylinder
+    /// impulse structure to remove. A real accelerometer sees each firing as a
+    /// discrete event and a missing one as a hole; here it is the absence of a
+    /// contribution to a smooth waveform. Asserting a magnitude would be asserting
+    /// a number chosen to make the assertion pass.
+    #[test]
+    fn a_misfire_makes_the_signal_impulsive_without_making_it_louder() {
+        let settle = |rate: f64| {
+            let mut vib = VibrationChannel::new(Rng::new(3));
+            for _ in 0..80 {
+                vib.advance(3720.0, 0.35, rate, 0.05);
+            }
+            (vib.rms(), vib.kurtosis())
+        };
+        let (healthy_rms, healthy_kurtosis) = settle(0.0);
+        let (misfiring_rms, misfiring_kurtosis) = settle(0.20);
+
+        assert!(
+            misfiring_kurtosis > healthy_kurtosis,
+            "kurtosis {healthy_kurtosis} -> {misfiring_kurtosis}: the deficit is not \
+             impulsive, check MISFIRE_DECAY"
+        );
+        assert!(
+            misfiring_rms <= healthy_rms,
+            "RMS {healthy_rms} -> {misfiring_rms}: a missing combustion event removes \
+             energy, so the broadband level must not rise"
+        );
     }
 
     #[test]

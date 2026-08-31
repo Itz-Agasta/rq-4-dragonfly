@@ -110,6 +110,12 @@ injector_flow_g_per_s = 17.0 # estimated, common-rail solenoid nozzle at 1600 ba
 # and an injector fault is a departure of one of them from unity.
 injector_scale = [1.0, 1.0, 1.0, 1.0] # estimated
 
+# Per-cylinder combustion efficiency, unity on a healthy engine. A misfiring
+# cylinder is fuelled and does not burn, so this falls while injector_scale stays
+# at unity. Holding the two apart is what separates an injection fault from a
+# combustion one downstream; see the note in params.rs.
+combustion_efficiency = [1.0, 1.0, 1.0, 1.0] # estimated
+
 [friction]
 # Friction mean effective pressure in bar as a quadratic in crank speed in
 # thousands of rpm, the classical form. Coefficients chosen to give 0.75 bar at
