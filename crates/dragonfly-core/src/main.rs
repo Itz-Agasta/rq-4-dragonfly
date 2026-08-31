@@ -183,18 +183,31 @@ async fn pump(
 
         if publish && let Some(mut frame) = fusion.frame(now) {
             let stale = !frame.link_ok;
+            let stale_ms = STALE_AFTER.as_millis() as u64;
+            // `frame.link_ok` covers only the engine controller. The twin's
+            // measurement also draws on the auxiliary, air-data and power
+            // sources, so a node other than the engine going silent would
+            // otherwise feed the estimator the same frozen reading forever,
+            // which it would read as an engine that has stopped moving.
+            let measurement_fresh = frame.link_ok
+                && frame.ages.auxiliary_ms < stale_ms
+                && frame.ages.air_data_ms < stale_ms
+                && frame.ages.power_ms < stale_ms;
 
-            // Only stepped on live data. Feeding a frozen measurement to an
-            // estimator makes it more confident every frame that the engine is
-            // exactly where it stopped reporting from, which is the opposite of
-            // what a silent bus means.
-            if frame.link_ok
-                && let Err(error) = twin.update(&frame.measurement(params.limits.rated_power_w))
-            {
-                tracing::warn!(%error, "twin lost its estimate, re-seeding");
-            }
-            if twin.is_seeded() {
-                frame.twin = Some(twin.output().clone());
+            if measurement_fresh {
+                // Only stepped on live data. Feeding a frozen measurement to an
+                // estimator makes it more confident every frame that the engine
+                // is exactly where it stopped reporting from, which is the
+                // opposite of what a silent bus means.
+                if let Err(error) = twin.update(&frame.measurement(params.limits.rated_power_w)) {
+                    tracing::warn!(%error, "twin lost its estimate, re-seeding");
+                }
+                // Attached only on the tick it was current for. Carrying the
+                // last estimate forward on a stale frame would present an old
+                // diagnosis as synchronised with a measurement it never saw.
+                if twin.is_seeded() {
+                    frame.twin = Some(twin.output().clone());
+                }
             }
             link.record(frame.seq, frame.link_ok, twin.output().locked);
             // A send with no subscribers is not an error; the core runs whether
