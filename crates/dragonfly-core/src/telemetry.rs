@@ -45,7 +45,10 @@ pub struct SourceAges {
     pub auxiliary_ms: u64,
     /// Fuel tank status, node 42.
     pub fuel_ms: u64,
-    /// Air data computer, node 43.
+    /// Air data computer, node 43: the oldest of pressure, temperature and
+    /// airspeed. Three separate messages from one node do not go stale
+    /// together, so this is the worst of the three rather than one standing
+    /// in for all.
     pub air_data_ms: u64,
     /// Power module, node 44.
     pub power_ms: u64,
@@ -319,7 +322,9 @@ impl Fusion {
                 engine_ms: age_ms(now, Some(*engine_at)),
                 auxiliary_ms: age_ms(now, self.auxiliary.as_ref().map(|(t, _)| *t)),
                 fuel_ms: age_ms(now, self.fuel.as_ref().map(|(t, _)| *t)),
-                air_data_ms: age_ms(now, self.pressure.as_ref().map(|(t, _)| *t)),
+                air_data_ms: age_ms(now, self.pressure.as_ref().map(|(t, _)| *t))
+                    .max(age_ms(now, self.temperature.as_ref().map(|(t, _)| *t)))
+                    .max(age_ms(now, self.airspeed.as_ref().map(|(t, _)| *t))),
                 power_ms: age_ms(now, self.bus.as_ref().map(|(t, _)| *t)),
             },
 
@@ -477,6 +482,40 @@ mod tests {
         let frame = fusion.frame(Instant::now()).expect("a frame");
         assert!(!frame.link_ok);
         assert!(frame.ages.engine_ms >= 1000);
+    }
+
+    /// Pressure, temperature and airspeed are three separate messages from the
+    /// air data node; one going quiet while the others keep talking must not
+    /// read as fresh.
+    #[test]
+    fn air_data_is_only_as_fresh_as_its_stalest_message() {
+        let mut fusion = Fusion::new();
+        let now = Instant::now();
+        let long_ago = now - Duration::from_secs(1);
+        fusion.engine(now, running_status());
+        fusion.pressure(
+            now,
+            StaticPressure {
+                static_pressure: 42_070.0,
+                static_pressure_variance: 25.0,
+            },
+        );
+        fusion.temperature(
+            long_ago,
+            StaticTemperature {
+                static_temperature: 242.15,
+                static_temperature_variance: 0.25,
+            },
+        );
+        fusion.airspeed(
+            now,
+            IndicatedAirspeed {
+                indicated_airspeed: 40.1,
+                indicated_airspeed_variance: 0.5,
+            },
+        );
+        let frame = fusion.frame(now).expect("a frame");
+        assert!(frame.ages.air_data_ms >= 1000, "{}", frame.ages.air_data_ms);
     }
 
     /// `u64::MAX` does not survive MessagePack into a JavaScript number, so a
