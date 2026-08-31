@@ -107,6 +107,9 @@ pub struct Cylinder {
     pub eta_sc: f64,
     /// Injected fuel mass per cylinder per cycle at full FADEC command, mg.
     pub u_f_max_mg: f64,
+    /// Injector flow rate at rail pressure, g/s. Converts a commanded mass into
+    /// the injection duration an engine controller broadcasts.
+    pub injector_flow_g_per_s: f64,
     /// Per-cylinder injector flow scale. Unity on a healthy engine; this is the
     /// parameter an injector fault acts on.
     pub injector_scale: [f64; crate::CYLINDERS],
@@ -284,6 +287,9 @@ pub struct Limits {
     pub rpm_max: f64,
     /// Smoke-limit air/fuel excess ratio. Fuelling is clipped to hold this.
     pub lambda_min: f64,
+    /// Rated brake power, W. The denominator an engine controller divides by when
+    /// it broadcasts engine load as a percentage.
+    pub rated_power_w: f64,
 }
 
 /// A complete engine.

@@ -97,6 +97,13 @@ eta_sc = 1.21 # estimated
 # fuel consumption simultaneously.
 u_f_max_mg = 67.4 # estimated
 
+# Injector flow rate at rail pressure. Fixes the duration a controller commands for
+# a given mass, which is the only per-cylinder fuelling quantity on the bus. Sized so
+# the rated 67.4 mg is delivered in 4.0 ms, which is about an eighth of a cycle at the
+# rated speed; a nozzle an order of magnitude slower would still be injecting when the
+# exhaust valve opened.
+injector_flow_g_per_s = 17.0 # estimated, common-rail solenoid nozzle at 1600 bar
+
 # Per-cylinder injector flow scale, unity on a healthy engine. Present so that
 # per-cylinder exhaust and head temperatures exist at all: with four identical
 # scales the cylinders are identical, which is what a healthy engine looks like,
@@ -228,3 +235,4 @@ bypass_fraction = 0.08 # estimated
 [limits]
 rpm_max = 4220.0 # published, maximum engine overspeed
 lambda_min = 1.30 # estimated, smoke limit for a modern common-rail diesel
+rated_power_w = 132000.0 # published, take-off rating at 3880 rpm
