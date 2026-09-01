@@ -85,6 +85,10 @@ golden:
 validate:
     cargo run -p engine-model --example validation_sweep
 
+# Regenerate docs/fault_signatures.md, the diagnosis layer's evidence.
+signatures:
+    cargo run --release -p twin-core --example signature_matrix
+
 clean:
     cargo clean
     rm -rf ui/dist node_modules ui/node_modules
