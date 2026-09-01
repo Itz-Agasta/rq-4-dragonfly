@@ -196,6 +196,36 @@ export const HYPOTHESES = [
 ] as const;
 
 /**
+ * Remaining useful life of one parameter or subsystem. Mirrors `prognostics::Rul`.
+ *
+ * `hours` is null when nothing is degrading, which is **not** zero. Rendering a
+ * null as 0 h grounds a serviceable aircraft; render it as a dash.
+ */
+export interface Rul {
+  hours: number | null;
+  /** Lower bound. The number a go/no-go call is taken on. */
+  p10: number | null;
+  /** Upper bound, null while the decline is too slow to bound above. */
+  p90: number | null;
+  /** Health parameter that produced it. */
+  driver: string;
+  /** Fraction of the way from nominal to failure, 0 to 1. */
+  consumed: number;
+  /** Rate of decline per hour, positive. */
+  rate_per_hour: number;
+}
+
+/** Remaining life across the engine. Mirrors `prognostics::Prognosis`. */
+export interface Prognosis {
+  /** Per health parameter, in `theta` order. */
+  parameter: Rul[];
+  /** Per subsystem, in `SUBSYSTEMS` order. */
+  subsystem: Rul[];
+  /** Subsystem that reaches its threshold first, or null. */
+  limiting: number | null;
+}
+
+/**
  * One instant of measured telemetry, with the twin's reading of it.
  *
  * Everything outside `twin` is a measurement or is derived from measurements
@@ -278,6 +308,8 @@ export interface Frame {
 
   /** The twin's output, or null before it has an estimate. */
   twin: TwinOutput | null;
+  /** Remaining life, or null until the trend window has five minutes to fit. */
+  prognosis: Prognosis | null;
 }
 
 /** Connection state, for the shell to render a link indicator. */

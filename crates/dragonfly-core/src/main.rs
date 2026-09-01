@@ -148,6 +148,10 @@ async fn pump(
     let mut ingest = Ingest::new(auxiliary_data_type_id);
     let mut fusion = Fusion::new();
     let mut twin = Twin::new(params.clone());
+    // Degradation trends live here rather than inside the twin because
+    // `prognostics` depends on `twin-core` and not the other way round: the filter
+    // has no business knowing that anyone is extrapolating it.
+    let mut trends = prognostics::Trends::new();
     let mut logged = Instant::now();
 
     loop {
@@ -198,7 +202,15 @@ async fn pump(
                     // Attached only to the frame it was computed from. Carrying
                     // the last estimate forward would present an old diagnosis
                     // as synchronised with a measurement the twin never saw.
-                    Ok(Some(output)) => frame.twin = Some(output.clone()),
+                    Ok(Some(output)) => {
+                        trends.observe(frame.t_s, &output.theta);
+                        // Attached to every frame even though it changes once a
+                        // second, because a client that reconnects mid-mission
+                        // would otherwise wait up to a second with nothing to
+                        // draw in the remaining-life panel.
+                        frame.prognosis = Some(prognostics::evaluate(&trends));
+                        frame.twin = Some(output.clone());
+                    }
                     Ok(None) => {}
                     Err(error) => tracing::warn!(%error, "twin lost its estimate, re-seeding"),
                 }

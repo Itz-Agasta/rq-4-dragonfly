@@ -23,6 +23,7 @@ use dronecan_ice::{
     AuxiliaryStatus, CircuitStatus, EngineState, FuelTankStatus, IndicatedAirspeed,
     ReciprocatingStatus, StaticPressure, StaticTemperature,
 };
+use prognostics::Prognosis;
 use serde::Serialize;
 use twin_core::{Measurement, TwinOutput};
 
@@ -146,6 +147,14 @@ pub struct Frame {
 
     /// What the twin makes of this instant, or `None` before it has an estimate.
     pub twin: Option<TwinOutput>,
+
+    /// Remaining useful life per parameter and per subsystem.
+    ///
+    /// Separate from `twin` and updated on its own schedule: the trend it comes
+    /// from is fitted once a second over half an hour, so attaching it to every
+    /// 20 Hz frame would repeat one answer twenty times. `None` until the trend
+    /// window has enough samples to fit, which is five minutes of flight.
+    pub prognosis: Option<Prognosis>,
 }
 
 impl Frame {
@@ -380,6 +389,7 @@ impl Fusion {
             engine_state: state_name(status.state),
             flags: status.flags,
             twin: None,
+            prognosis: None,
         })
     }
 }
