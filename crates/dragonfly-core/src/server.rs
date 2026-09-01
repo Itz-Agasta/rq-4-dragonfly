@@ -1,9 +1,9 @@
 //! The HTTP and WebSocket surface.
 //!
-//! Three things: a WebSocket carrying telemetry, a health endpoint, and the
-//! frontend bundle. Serving the bundle from the same process is what makes the
-//! demo one binary and a browser rather than a stack of services, and it is what
-//! an air-gapped ground station needs anyway.
+//! Four things: a WebSocket carrying telemetry, a health endpoint, the fault
+//! signature matrix, and the frontend bundle. Serving the bundle from the same
+//! process is what makes the demo one binary and a browser rather than a stack of
+//! services, and it is what an air-gapped ground station needs anyway.
 //!
 //! Telemetry goes out as MessagePack rather than JSON. At 20 Hz with fifty
 //! fields, JSON spends most of its bytes on field names that never change, and
@@ -25,6 +25,9 @@ use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::telemetry::Frame;
+use twin_core::channels::TABLE;
+use twin_core::health::{DESCRIPTORS, PARAMS};
+use twin_core::signature::{HYPOTHESES, Signatures, catalogue};
 
 /// What the ingest loop publishes about itself for the health endpoint.
 ///
@@ -59,6 +62,50 @@ pub struct AppState {
     pub iface: String,
     /// Last thing the ingest loop said about the bus.
     pub link: Arc<LinkStatus>,
+    /// The fault signature matrix, generated once at startup from the engine
+    /// parameters. Served rather than streamed: it is constant for a given
+    /// engine, and 198 floats twenty times a second would be the largest thing
+    /// on the wire and never change.
+    pub signatures: Arc<Signatures>,
+}
+
+/// What `/api/signatures` answers.
+///
+/// The matrix a diagnosis screen draws its rows from, with the axes named so the
+/// client does not have to keep its own copy of either and drift from it.
+#[derive(Debug, Serialize)]
+struct Matrix {
+    /// Hypothesis names, in row order. Index 0 is the null hypothesis.
+    hypotheses: [&'static str; HYPOTHESES],
+    /// Subsystem each hypothesis belongs to, indexing the health rail.
+    subsystem: [usize; HYPOTHESES],
+    /// Whether each hypothesis is a fault in the instrument rather than the
+    /// engine, which is the one case where the right action is to distrust the
+    /// measurement rather than open the machine.
+    instrument: [bool; HYPOTHESES],
+    /// Channel names, in column order.
+    channels: Vec<&'static str>,
+    /// One unit-length row per hypothesis: the direction that fault pushes the
+    /// residual, in each channel's own standard deviations.
+    rows: Vec<Vec<f64>>,
+    /// The health parameters, in `theta` order, with the two values a
+    /// degradation trajectory needs an axis between.
+    parameters: [Parameter; PARAMS],
+}
+
+/// One health parameter's identity and the span a trajectory is drawn across.
+///
+/// Sent rather than mirrored in the client because `prognostics::rul` projects to
+/// exactly this `failure` value: a chart that drew its own threshold would be free
+/// to disagree with the number beside it about when the engine stops flying.
+#[derive(Debug, Serialize)]
+struct Parameter {
+    /// Short name, matching `Rul::driver`.
+    name: &'static str,
+    /// Value on a healthy engine.
+    nominal: f64,
+    /// Value at which the subsystem no longer meets its duty.
+    failure: f64,
 }
 
 /// What `/api/health` answers.
@@ -89,6 +136,7 @@ pub fn router(state: AppState, ui_dir: PathBuf) -> Router {
     Router::new()
         .route("/ws", get(websocket))
         .route("/api/health", get(health))
+        .route("/api/signatures", get(signatures))
         .fallback_service(files)
         // The bundle is same-origin in the kiosk, but the Vite dev server is not,
         // and D7 onward is developed against it.
@@ -104,6 +152,24 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
         last_seq: state.link.last_seq.load(Ordering::Relaxed),
         link_ok: state.link.link_ok.load(Ordering::Relaxed),
         twin_locked: state.link.twin_locked.load(Ordering::Relaxed),
+    })
+}
+
+async fn signatures(State(state): State<AppState>) -> impl IntoResponse {
+    let rows = catalogue();
+    Json(Matrix {
+        hypotheses: std::array::from_fn(|h| rows[h].name),
+        subsystem: std::array::from_fn(|h| rows[h].subsystem),
+        instrument: std::array::from_fn(|h| rows[h].instrument),
+        channels: TABLE.iter().map(|c| c.name).collect(),
+        rows: (0..HYPOTHESES)
+            .map(|h| state.signatures.row(h).to_vec())
+            .collect(),
+        parameters: std::array::from_fn(|i| Parameter {
+            name: DESCRIPTORS[i].name,
+            nominal: DESCRIPTORS[i].nominal,
+            failure: DESCRIPTORS[i].failure,
+        }),
     })
 }
 

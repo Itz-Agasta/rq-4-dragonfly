@@ -12,7 +12,7 @@
    All neutrals chroma < 0.013 (v1 greys were visibly blue). */
 
 :root {
-  /* --- surfaces: true black, barely-lifted panels --------------------- */
+  /* surfaces: true black, barely-lifted panels */
   --background: #000000; /* page void                        */
   --card: #0a0a0b; /* panel      1.06:1 vs void        */
   --popover: #141416; /* overlays                         */
@@ -22,7 +22,7 @@
   --border: #232326; /* hairline   1.26:1 vs panel       */
   --input: #0a0a0b;
 
-  /* --- neutrals: chroma < 0.013, genuinely grey ----------------------- */
+  /* neutrals: chroma < 0.013, genuinely grey */
   --foreground: #f0f0f2; /* 17.39:1  values, primary text    */
   --card-foreground: #f0f0f2;
   --popover-foreground: #f0f0f2;
@@ -34,12 +34,12 @@
   --structure-hi: #55555c; /*  3.31:1  key edges, active outlines, corner marks */
   --grid: #131315; /*          canvas grid lines       */
 
-  /* --- the single accent ---------------------------------------------- */
+  /* the single accent */
   --primary: #ff6b35; /*  7.51:1  accent / caution / primary action */
   --primary-foreground: #000000;
   --ring: #ff6b35;
 
-  /* --- alarm states ---------------------------------------------------- */
+  /* alarm states */
   --warn: #ff6b35; /* same as accent, caution */
   --crit: #ff453a; /*  5.81:1  warning, don't waste it */
   --destructive: #ff453a;
@@ -47,19 +47,19 @@
   --ok: #8e8e96; /* grey. healthy is quiet, not green. kept as token
                                           so legacy `text-ok` still works. */
 
-  /* --- traces ---------------------------------------------------------- */
+  /* traces */
   --measured: #f0f0f2; /* solid  2px                       */
   --predicted: #6e6e76; /* dashed 1.5px, 4.44:1 from measured */
   --trace-ghost: #3a3a40; /* inactive series                  */
 
-  /* --- charts: luminance ramp, not a rainbow --------------------------- */
+  /* charts: luminance ramp, not a rainbow */
   --chart-1: #f0f0f2; /* measured                         */
   --chart-2: #6e6e76; /* twin-predicted (render dashed)   */
   --chart-3: #ff6b35; /* attention series */
   --chart-4: #ff453a; /* critical threshold               */
   --chart-5: #3a3a40; /* ghost / reference band */
 
-  /* --- sidebar --------------------------------------------------------- */
+  /* sidebar */
   --sidebar: #000000;
   --sidebar-foreground: #8e8e96;
   --sidebar-primary: #ff6b35;
@@ -69,7 +69,7 @@
   --sidebar-border: #232326;
   --sidebar-ring: #ff6b35;
 
-  /* --- type ------------------------------------------------------------ */
+  /* type */
   /* one mono stack for everything. --font-sans aliases it so shadcn can't
      break the look by reaching for the "sans" token. */
   --font-mono:
@@ -80,11 +80,11 @@
   --tracking-normal: -0.01em;
   --tracking-label: 0.08em;
 
-  /* --- geometry -------------------------------------------------------- */
+  /* geometry */
   --radius: 0rem;
   --spacing: 0.25rem;
 
-  /* --- shadows: depth from hairlines, not drop shadows ----------------- */
+  /* shadows: depth from hairlines, not drop shadows */
   --shadow-2xs: none;
   --shadow-xs: none;
   --shadow-sm: none;
@@ -246,10 +246,8 @@
     background-size: 22px 22px;
   }
 
-  /* ---------------------------------------------------------------------
-     LATTICE, panels share hairline borders, no gaps, no shadows, no radius.
-     usage: <div class="lattice"> with <section class="cell"> children
-     --------------------------------------------------------------------- */
+  /* LATTICE, panels share hairline borders, no gaps, no shadows, no radius.
+     usage: <div class="lattice"> with <section class="cell"> children */
   .lattice {
     display: grid;
     gap: 0;
@@ -274,9 +272,7 @@
     padding: 0;
   }
 
-  /* ---------------------------------------------------------------------
-     Structural marks. Free polish -- most of what reads as "designed".
-     --------------------------------------------------------------------- */
+  /* Structural marks. Free polish -- most of what reads as "designed". */
 
   /* corner crosshairs */
   .marks {
@@ -334,9 +330,7 @@
     border-top: 0;
   }
 
-  /* ---------------------------------------------------------------------
-     type scale — not uniform, hierarchy needs size contrast.
-     --------------------------------------------------------------------- */
+  /* type scale — not uniform, hierarchy needs size contrast. */
   .t-hero {
     font-size: 40px;
     line-height: 1.05;
@@ -361,9 +355,31 @@
   }
   /* .label-micro (10px, uppercase, tracked) is defined above. */
 
-  /* ---------------------------------------------------------------------
-     provenance — line style + tag, never hue. keeps colour for alarm.
-     --------------------------------------------------------------------- */
+  /* tween: carries a bar between readouts.
+
+     Readouts are written at 5 Hz so a digit can be read; see lib/live.tsx. A
+     bar is not a digit, and stepped five times a second it reads as a stutter
+     rather than as a value. One linear tween over exactly one readout period
+     carries the geometry between samples, so the bar is continuous while the
+     number beside it stays legible.
+
+     Linear, and exactly one period: eased or longer and the bar is still
+     travelling when its next value lands, which puts the graphic behind the
+     digit it belongs to. This is showing the data, not decorating it, which is
+     why it is not ambient motion. */
+  .tween {
+    transition:
+      width 200ms linear,
+      left 200ms linear,
+      background-color 200ms linear;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tween {
+      transition: none;
+    }
+  }
+
+  /* provenance — line style + tag, never hue. keeps colour for alarm. */
   .inferred {
     border: 1px dashed var(--foreground-dim);
   }

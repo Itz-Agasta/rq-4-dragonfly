@@ -15,6 +15,7 @@
 import { Ring } from "@/lib/ring";
 import type { Frame } from "@/lib/telemetry";
 import { CHANNELS, RECORDED } from "@/store/frame";
+import { ThetaHistory } from "@/store/theta";
 
 /** Window held for the streaming strips, seconds. */
 export const HISTORY_SECONDS = 90;
@@ -43,11 +44,19 @@ class TelemetryStore {
 
   private readonly unavailable = new Set<string>(RECORDED);
 
+  /**
+   * Health parameter estimates at 1 Hz over thirty minutes, for the degradation
+   * trajectory. Kept here rather than on ANALYSIS so the window survives
+   * navigating away from the screen.
+   */
+  readonly theta = new ThetaHistory();
+
   /** Most recent frame, or null before the first one arrives. */
   latest: Frame | null = null;
 
   push(frame: Frame): void {
     this.latest = frame;
+    this.theta.push(frame);
     this.time.push(Number.isFinite(frame.t_s) ? frame.t_s : 0);
 
     for (const id of RECORDED) {

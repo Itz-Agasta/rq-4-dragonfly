@@ -6,9 +6,10 @@
 //! uncertainties the fit already produced. Nothing is trained and no data is needed,
 //! which is why this ships whether or not the learned correction ever does.
 //!
-//! **The interval is covariance-derived and it is not conformal**, whatever
-//! `design.md` says: conformal prediction earns its coverage from a calibration set
-//! of run-to-failure trajectories and there is none until D12's recorder.
+//! **The interval is covariance-derived and it is not conformal.** Conformal
+//! prediction earns its coverage from a calibration set of run-to-failure
+//! trajectories, and there is none until the recorder exists. Do not relabel it
+//! conformal without one.
 //!
 //! Celaya, Saxena & Goebel, PHM Society 2012, for the forecast-to-threshold
 //! formulation and the warning that a remaining life is a ratio and not normal.
@@ -46,6 +47,13 @@ pub struct Rul {
     pub consumed: f64,
     /// Rate of decline, per hour, as a positive number.
     pub rate_per_hour: f64,
+    /// Seconds of flight the slope was fitted over.
+    ///
+    /// Carried so a display can say what the projection rests on. A remaining
+    /// life read off six minutes of a demonstration ramp and one read off half an
+    /// hour of cruise are different claims, and the number alone does not say
+    /// which it is.
+    pub fit_span_s: f64,
 }
 
 /// Which parameters each subsystem's life is limited by.
@@ -129,6 +137,7 @@ fn project(i: usize, trend: &Trend, degrading: bool) -> Rul {
         out.consumed = 0.0;
         return out;
     }
+    out.fit_span_s = trend.span_s;
     if !degrading {
         return out;
     }

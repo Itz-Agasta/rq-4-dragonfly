@@ -74,11 +74,16 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let (frames, _) = broadcast::channel(CHANNEL_DEPTH);
     let link = Arc::new(LinkStatus::default());
+    let params = engine_model::engines::ae330();
 
     let state = AppState {
         frames: frames.clone(),
         iface: args.iface.clone(),
         link: Arc::clone(&link),
+        // Generated here rather than inside the twin so the server can answer
+        // before the first CAN frame arrives; a screen must be able to draw its
+        // axes on a bus that has not started yet.
+        signatures: Arc::new(twin_core::Signatures::generate(&params)),
     };
     let app = server::router(state, args.ui_dir.clone());
 
@@ -92,7 +97,13 @@ async fn main() -> Result<()> {
         "serving"
     );
 
-    let ingest = tokio::spawn(ingest_loop(args.iface.clone(), args.aux_dtid, frames, link));
+    let ingest = tokio::spawn(ingest_loop(
+        args.iface.clone(),
+        args.aux_dtid,
+        frames,
+        link,
+        params,
+    ));
 
     tokio::select! {
         result = axum::serve(listener, app) => result.context("serving HTTP")?,
@@ -112,11 +123,11 @@ async fn ingest_loop(
     auxiliary_data_type_id: u16,
     frames: broadcast::Sender<Arc<telemetry::Frame>>,
     link: Arc<LinkStatus>,
+    params: EngineParams,
 ) -> Result<()> {
     // The twin is built per connection rather than per process. A bus that has
     // been down for seconds has left the estimate describing an engine that has
     // since moved, and re-seeding from the first frame back costs one millisecond.
-    let params = engine_model::engines::ae330();
     let mut backoff = Duration::from_millis(250);
     loop {
         match CanSocket::open(&iface) {
