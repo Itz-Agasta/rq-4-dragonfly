@@ -7,6 +7,7 @@
 
 import { createBrowserRouter, Navigate } from "react-router";
 
+import { Analysis } from "@/components/analysis/Analysis";
 import { NotBuilt } from "@/components/app/NotBuilt";
 import { Shell } from "@/components/app/Shell";
 import { Ops } from "@/components/ops/Ops";
@@ -22,10 +23,7 @@ export const router = createBrowserRouter([
         path: "twin",
         element: <NotBuilt title="TWIN" note="measured against physics · not built" />,
       },
-      {
-        path: "analysis",
-        element: <NotBuilt title="ANALYSIS" note="diagnosis and prognosis · not built" />,
-      },
+      { path: "analysis", element: <Analysis /> },
       {
         path: "simulate",
         element: <NotBuilt title="SIMULATE" note="mission projection · not built" />,

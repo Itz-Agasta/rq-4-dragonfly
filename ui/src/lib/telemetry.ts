@@ -213,6 +213,8 @@ export interface Rul {
   consumed: number;
   /** Rate of decline per hour, positive. */
   rate_per_hour: number;
+  /** Seconds of flight the slope was fitted over. */
+  fit_span_s: number;
 }
 
 /** Remaining life across the engine. Mirrors `prognostics::Prognosis`. */

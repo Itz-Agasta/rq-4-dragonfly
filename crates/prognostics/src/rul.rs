@@ -46,6 +46,13 @@ pub struct Rul {
     pub consumed: f64,
     /// Rate of decline, per hour, as a positive number.
     pub rate_per_hour: f64,
+    /// Seconds of flight the slope was fitted over.
+    ///
+    /// Carried so a display can say what the projection rests on. A remaining
+    /// life read off six minutes of a demonstration ramp and one read off half an
+    /// hour of cruise are different claims, and the number alone does not say
+    /// which it is.
+    pub fit_span_s: f64,
 }
 
 /// Which parameters each subsystem's life is limited by.
@@ -129,6 +136,7 @@ fn project(i: usize, trend: &Trend, degrading: bool) -> Rul {
         out.consumed = 0.0;
         return out;
     }
+    out.fit_span_s = trend.span_s;
     if !degrading {
         return out;
     }
