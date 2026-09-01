@@ -2,16 +2,14 @@
  * What the twin thinks is wrong, and why it thinks the alternatives are not.
  *
  * The winner is expanded with its posterior and the evidence behind it; the
- * runners-up are dim, with the channel that rejected each one. `design.md` calls
- * the rejection the most convincing thing on the screen, and it is computed from
- * the observation rather than templated: it names the channel where that
- * hypothesis's own best fit disagrees most with what the engine is doing.
+ * runners-up are dim, with the channel that rejected each one. The rejection is
+ * computed from the observation rather than templated: it names the channel where
+ * that hypothesis's own best fit disagrees most with what the engine is doing.
  *
  * Everything the library carries and did not choose is listed below the
  * runners-up. That block exists because the column has a void under it when only
  * one alternative has weight, and because four rows of a nine-row library read as
  * a shortlist someone drew up rather than as the whole library being scored.
- * `docs/design/PUNCHLIST.md`, ANALYSIS [B] and [C].
  */
 
 import { useRef } from "react";
@@ -169,9 +167,9 @@ export function Hypotheses({ data }: { data: Matrix }) {
         <h2 className="t-section">Diagnosis</h2>
       </header>
 
-      {/* 2px accent edge on the winner, the artboard's structural mark for the
-          selected hypothesis. It is the cheapest way to say which row the rest of
-          the column is about without spending the hue on text. */}
+      {/* 2px accent edge marks the selected hypothesis. Cheapest way to say
+          which row the rest of the column is about without spending the hue on
+          text. */}
       <div className="border-border relative shrink-0 border-b px-4 py-4">
         <span className="bg-primary absolute inset-y-0 left-0 w-[2px]" aria-hidden="true" />
         <span ref={kind} className="label-micro block" />

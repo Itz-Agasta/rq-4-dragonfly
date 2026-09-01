@@ -6,9 +6,10 @@
 //! uncertainties the fit already produced. Nothing is trained and no data is needed,
 //! which is why this ships whether or not the learned correction ever does.
 //!
-//! **The interval is covariance-derived and it is not conformal**, whatever
-//! `design.md` says: conformal prediction earns its coverage from a calibration set
-//! of run-to-failure trajectories and there is none until D12's recorder.
+//! **The interval is covariance-derived and it is not conformal.** Conformal
+//! prediction earns its coverage from a calibration set of run-to-failure
+//! trajectories, and there is none until the recorder exists. Do not relabel it
+//! conformal without one.
 //!
 //! Celaya, Saxena & Goebel, PHM Society 2012, for the forecast-to-threshold
 //! formulation and the warning that a remaining life is a ratio and not normal.

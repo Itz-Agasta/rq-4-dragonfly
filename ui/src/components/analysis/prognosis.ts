@@ -9,17 +9,13 @@ import type { Frame } from "@/lib/telemetry";
 /**
  * Floor of the shared log axis, hours.
  *
- * `docs/design/PUNCHLIST.md` ANALYSIS [A] asks for a 1 h floor against the
- * artboard's 4, because at 4 h the only row that matters lands in the leftmost
- * few percent of the track, crushed under its own label, while every healthy
- * subsystem gets a clearly placed tick: the failing row becomes the one row that
- * cannot be read.
- *
- * The floor is 0.1 h rather than 1 h for that same reason carried one decade
- * further. A remaining life under an hour is not hypothetical here: measured on
- * the bus with a coking injector it reads 0.67 h, which at a 1 h floor clamps
- * hard against the left stop and is invisible for exactly the reason the
- * punchlist item was written. Five decades still leave about 60 px each.
+ * The floor sets which row is legible, so it is placed under the shortest life
+ * the bus actually produces rather than at a round number. A coking injector
+ * measures 0.67 h: at a 1 h floor it clamps against the left stop, and at a 4 h
+ * floor it lands in the leftmost few percent of the track crushed under its own
+ * label, while every healthy subsystem gets a clearly placed tick. The one row
+ * that matters becomes the one row that cannot be read. Five decades from 0.1 h
+ * still leave about 60 px each.
  */
 export const AXIS_MIN_H = 0.1;
 
@@ -57,13 +53,32 @@ export function focus(frame: Frame, parameters: Parameter[]): number | null {
     if (i >= 0) return i;
   }
 
+  // `Rul::consumed` is zeroed until a parameter's trend is ready, which takes
+  // five minutes of flight. Ranking those ties every entry at zero and returns
+  // parameter 0 whatever the engine is doing, so the panel names a parameter
+  // sitting at nominal beside a diagnosis naming a different one. The same
+  // fraction taken from the live estimate needs no history and stands in.
+  const theta = frame.twin?.theta;
   let best = -1;
   let most = -Infinity;
-  p.parameter.forEach((r, i) => {
-    if (r.consumed > most) {
-      most = r.consumed;
+  parameters.forEach((d, i) => {
+    const consumed = p.parameter[i]?.consumed || spent(theta?.[i], d);
+    if (consumed > most) {
+      most = consumed;
       best = i;
     }
   });
   return best < 0 ? null : best;
+}
+
+/**
+ * Fraction of a parameter's nominal-to-failure span already given up.
+ *
+ * Clamped at zero: a parameter estimated above nominal has not recovered life it
+ * never spent, and a negative share would outrank a real one.
+ */
+function spent(value: number | undefined, d: Parameter): number {
+  if (value === undefined || !Number.isFinite(value)) return 0;
+  const span = d.nominal - d.failure;
+  return span === 0 ? 0 : Math.max((d.nominal - value) / span, 0);
 }

@@ -7,12 +7,11 @@
  * `0.15 h` alone invites a reader to conclude that injectors coke in nine minutes.
  * The driver, the fitted rate and the span the fit covers sit beside it so the
  * figure explains itself. A realistic rate needs a recorded mission replayed
- * through the twin, which is D12; see `handover.md` 4.
+ * through the twin.
  *
- * The artboard's `Mission remaining 25.7 h · shortfall 19.5 h` line is not here.
- * Nothing on this bus carries a planned mission length, so it could only be
- * authored, and a shortfall is the one number in this column an operator would
- * act on directly.
+ * A mission-remaining and shortfall line is deliberately absent. Nothing on this
+ * bus carries a planned mission length, so it could only be authored, and a
+ * shortfall is the one number in this column an operator would act on directly.
  *
  * Rows are in `SUBSYSTEMS` order and do not move, for the reason the matrix rows
  * do not: this updates live and a table that sorts itself is unreadable exactly
@@ -150,14 +149,10 @@ export function Prognosis({ parameters }: { parameters: Parameter[] }) {
       <div className="border-border shrink-0 border-b">
         <div className="px-4 pt-2 pb-1">
           <span className="label-micro">subsystem · remaining life</span>
-          {/* Ticks on their own row rather than beside the caption: the axis
-              floor is 1 h, so its label sits at the very left of the track and
-              lands underneath any caption sharing the line.
-
-              Floor 1 h, not the artboard's 4. At a 4 h floor the one row that
-              matters lands in the leftmost few percent of the track, under its
-              own label, and becomes the only row that cannot be read.
-              `docs/design/PUNCHLIST.md`, ANALYSIS [A]. */}
+          {/* Ticks on their own row rather than beside the caption: the floor
+              tick's label sits at the very left of the track and would land
+              underneath any caption sharing the line. The floor itself is
+              `AXIS_MIN_H`, which carries why it sits where it does. */}
           <div className="relative mt-1 h-[13px]">
             {AXIS_TICKS.map((h, i) => (
               <span

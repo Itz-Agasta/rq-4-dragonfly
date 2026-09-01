@@ -10,9 +10,8 @@
  *
  * The cone is drawn between the line that reaches failure at p10 and the line
  * that reaches it at p90, so it is exactly as wide as the interval printed above
- * it. The mock drew a hairline cone beside a stated 3.1 h spread, which reads as
- * false precision and is worse than showing no cone at all.
- * `docs/design/PUNCHLIST.md`, ANALYSIS [A].
+ * it. A hairline cone drawn beside a stated multi-hour spread reads as false
+ * precision and is worse than showing no cone at all.
  */
 
 import { useRef } from "react";

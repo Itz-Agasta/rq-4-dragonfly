@@ -3,9 +3,9 @@
  *
  * MOCK: the text is templated, from `./advisory`. The selection is live.
  *
- * The artboard's two outline buttons, `SCHEDULE RTB` and `DERATE CYL 3`, are not
- * built. Neither has anything behind it: there is no dispatch path to schedule a
- * return and no per-cylinder derate command on this bus. A control that looks
+ * `SCHEDULE RTB` and `DERATE CYL 3` controls are deliberately not built. Neither
+ * has anything behind it: there is no dispatch path to schedule a return and no
+ * per-cylinder derate command on this bus. A control that looks
  * live and does nothing is worse on a demonstration than no control, because the
  * one person certain to press it is the person deciding whether to believe the
  * rest of the screen.
@@ -18,6 +18,9 @@ import { NO_VALUE } from "@/lib/fmt";
 import { useLiveSink } from "@/lib/live";
 import { isFresh } from "@/lib/telemetry";
 
+/** Shown before a frame arrives and whenever the twin has no estimate. */
+const WAITING = "Waiting for the twin";
+
 export function AdvisoryPanel() {
   const action = useRef<HTMLDivElement>(null);
   const duration = useRef<HTMLSpanElement>(null);
@@ -25,16 +28,19 @@ export function AdvisoryPanel() {
   const risk = useRef<HTMLSpanElement>(null);
 
   useLiveSink((frame) => {
-    const fresh = isFresh(frame.ages.engine_ms);
-    const best = frame.twin?.diagnosis.best ?? 0;
-    const task = fresh ? TASKS[best] : null;
+    const twin = frame.twin;
+    // No twin is not a diagnosis of NOMINAL. Defaulting the hypothesis index to
+    // zero reads an absent estimate as the nominal row, and the panel then clears
+    // an engine no estimator has looked at yet.
+    const diagnosed = twin !== null && isFresh(frame.ages.engine_ms);
+    const task = diagnosed ? TASKS[twin.diagnosis.best] : null;
 
     if (action.current) {
       action.current.textContent = task
         ? task.action
-        : fresh
+        : diagnosed
           ? "No action · every parameter is at nominal"
-          : "Waiting for the twin";
+          : WAITING;
     }
     if (duration.current) duration.current.textContent = task?.duration ?? NO_VALUE;
     if (parts.current) parts.current.textContent = task?.parts ?? NO_VALUE;
@@ -49,11 +55,14 @@ export function AdvisoryPanel() {
           ◊ INFERRED
         </span>
       </div>
-      {/* Scrolls rather than clips. `design.md` 10: long content gets
-          overflow-y auto, never a silent truncation, and the deferral line is
-          the one piece of copy here an operator acts on. */}
+      {/* Scrolls rather than clips: the deferral line is the one piece of copy
+          here an operator acts on, so it must never truncate silently. */}
       <div className="min-h-0 overflow-y-auto px-4 pt-3 pb-3">
-        <div ref={action} className="t-body text-foreground" />
+        {/* Reads before the first frame as it does without a twin, so the panel
+            never starts blank and never starts clear. */}
+        <div ref={action} className="t-body text-foreground">
+          {WAITING}
+        </div>
         <dl className="mt-2 grid grid-cols-[46px_minmax(0,1fr)] gap-x-[10px] gap-y-1">
           <dt className="label-micro">dur</dt>
           <dd>

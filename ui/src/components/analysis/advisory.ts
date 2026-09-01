@@ -4,20 +4,16 @@
  * MOCK: the four fields per row are authored maintenance text, replaced by the
  * operator's own task cards when there are any. What selects the row is live: the
  * hypothesis index comes from the posterior, and the remaining life beside it
- * comes from the fit. `docs/mvp.md` 1 licenses a templated advisory fed by real
- * values, and the panel carries a `◊ INFERRED` tag so nothing here is mistaken for
- * a manufacturer's schedule.
+ * comes from the fit. The panel carries a `◊ INFERRED` tag so nothing here is
+ * mistaken for a manufacturer's schedule.
  *
- * The field set is the artboard's: action, DUR, PARTS, RISK. Durations and part
- * numbers are **estimated** and class-typical for a 2-litre common-rail diesel;
- * EASA TCDS E.200 publishes neither.
+ * Durations and part numbers are **estimated** and class-typical for a 2-litre
+ * common-rail diesel; EASA TCDS E.200 publishes neither.
  *
  * The `risk` lines are the exception and are not authored freely. Each is the
  * consequence this engine model actually produces when the fault runs, which is
  * why they differ in kind rather than in severity: a lying thermocouple damages
- * nothing and a dry gallery damages everything. The artboard's own risk line
- * quotes figures the measurements do not support, and `handover.md` 4 says prefer
- * the measured set wherever the two disagree.
+ * nothing and a dry gallery damages everything.
  */
 
 /** Rows are indexed by hypothesis, in `HYPOTHESES` order. */

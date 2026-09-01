@@ -14,23 +14,43 @@
 import { useRef } from "react";
 
 import type { Matrix as MatrixData } from "@/components/analysis/signatures";
-import { ramp, sign } from "@/components/analysis/signatures";
+import { ramp, rampGradient, short, sign } from "@/components/analysis/signatures";
 import { fmt, NO_VALUE } from "@/lib/fmt";
 import { useLiveSink } from "@/lib/live";
 import { isFresh } from "@/lib/telemetry";
 
-/** Width of the right-aligned hypothesis labels, per `design.md`. */
-const LABEL_W = 178;
+/**
+ * Width of the right-aligned hypothesis labels.
+ *
+ * Sized to the longest name the catalogue actually produces, `CYLINDER 3
+ * MISFIRE` at 117px, plus its gutter. It was 178, which is the artboard's figure
+ * for labels like `Injector stuck rich · c3`; ours are shorter, and the surplus
+ * became 50px down the left edge that no label ever reached.
+ */
+const LABEL_W = 132;
 /** Width of the match-score column. */
 const SCORE_W = 46;
 /**
- * Row height, fixed, with the whole block centred in whatever height the panel
- * has. Letting the rows share the panel's height was tried and is worse: they
- * cap out, the leftover collects beneath them, and `OBSERVED NOW` ends up
- * stranded at the bottom of the panel. It has to sit directly under the
- * signatures, because comparing it against them is the only thing this is for.
+ * Height of the observed row, and the floor a signature row may shrink to.
+ *
+ * The signature rows themselves are not fixed, they share whatever the panel has
+ * left. `OBSERVED NOW` cannot be stranded by that, because it is a sibling of the
+ * rows container rather than one of the rows: the container takes the slack and
+ * the observed row stays welded to the bottom of it. It has to, since comparing
+ * it against the signatures is the only thing this panel is for.
  */
 const ROW_H = 32;
+
+/**
+ * Height of the rotated channel labels, including {@link LABEL_GUTTER} beneath.
+ *
+ * Set by the longest name, so every column pays for the worst one. {@link short}
+ * is what keeps that name to five characters, which measures 34px rotated.
+ */
+const LABEL_BAND_H = 40;
+
+/** Space under a rotated label, so it does not sit on the first row's cells. */
+const LABEL_GUTTER = 5;
 
 /**
  * One grid template, shared by the labels, every hypothesis row and the observed
@@ -42,26 +62,24 @@ const ROW_H = 32;
  * in, which is the only thing it is for.
  */
 function template(channels: number): string {
-  return `2px ${LABEL_W}px repeat(${channels}, minmax(0, 1fr)) ${SCORE_W}px`;
+  return `${LABEL_W}px repeat(${channels}, minmax(0, 1fr)) ${SCORE_W}px`;
 }
 
 /**
  * Rows are in catalogue order and do not move.
  *
- * `docs/design/PUNCHLIST.md` asks for rows sorted by match score descending, and
- * that is right for the static mock it was written about. On a 20 Hz screen it is
- * not: match scores wander with noise, so a sorted table reorders itself several
+ * Sorting by match score descending is the obvious arrangement and it is wrong
+ * here. The scores wander with noise, so a sorted table reorders itself several
  * times a second and becomes unreadable exactly when an operator is trying to
  * read it. A fixed order is also learnable, which a sorted one never is.
  *
- * The winner is marked instead, with an accent edge on its row, so the
- * comparison the sort existed to make is still one glance.
+ * The winner is named in the accent instead, on its label and its match score, so
+ * the comparison the sort existed to make is still one glance.
  */
 export function Matrix({ data }: { data: MatrixData }) {
   const observed = useRef<(HTMLDivElement | null)[]>([]);
   const scores = useRef<(HTMLSpanElement | null)[]>([]);
-  const marks = useRef<(HTMLDivElement | null)[]>([]);
-
+  const names = useRef<(HTMLSpanElement | null)[]>([]);
   useLiveSink((frame) => {
     const twin = frame.twin;
     const fresh = isFresh(frame.ages.engine_ms);
@@ -85,16 +103,17 @@ export function Matrix({ data }: { data: MatrixData }) {
       cell.style.borderBottomColor = edge === "bottom" ? "var(--structure-hi)" : "transparent";
     });
 
+    // The winner is named in the accent rather than edged with a rule. A 2px bar
+    // at the left of the label column sat a whole label width away from the row it
+    // marked and read as a stray mark rather than as a selection.
     scores.current.forEach((slot, h) => {
       if (!slot) return;
+      const won = fresh && diagnosis !== undefined && diagnosis.best === h;
       const score = diagnosis?.match_score[h];
       slot.textContent = score === undefined || !fresh || h === 0 ? NO_VALUE : fmt(score, 2);
-    });
-
-    marks.current.forEach((mark, h) => {
-      if (!mark) return;
-      const won = fresh && diagnosis !== undefined && diagnosis.best === h;
-      mark.style.background = won ? "var(--primary)" : "transparent";
+      slot.style.color = won ? "var(--primary)" : "";
+      const name = names.current[h];
+      if (name) name.style.color = won ? "var(--primary)" : "";
     });
   });
 
@@ -106,76 +125,68 @@ export function Matrix({ data }: { data: MatrixData }) {
           <span className="label-micro">expression</span>
           {/* The legend is the ramp itself. A written range makes a reader
               translate; the gradient lets them match a cell against it. */}
-          <div
-            className="h-2 w-24"
-            style={{ background: "linear-gradient(90deg, #0a0a0b, #55555c, #f0f0f2)" }}
-            aria-hidden="true"
-          />
+          <div className="h-2 w-24" style={{ background: rampGradient() }} aria-hidden="true" />
           <span className="num text-muted-foreground text-[10px] tracking-[0.06em]">
             0 → 1 σ-norm
           </span>
         </div>
       </header>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col justify-center overflow-hidden px-4 py-3">
-        <div className="flex min-w-0 flex-col">
-          <ColumnLabels data={data} />
-          <div className="flex flex-col">
-            {data.hypotheses.map((name, h) => (
-              <div
-                key={name}
-                className="grid items-stretch"
-                style={{
-                  height: ROW_H,
-                  gridTemplateColumns: template(data.channels.length),
-                }}
-              >
-                <div
-                  aria-hidden
-                  ref={(el) => {
-                    marks.current[h] = el;
-                  }}
-                />
-                <span className="t-small text-muted-foreground self-center truncate pr-3 text-right">
-                  {name}
-                </span>
-                {data.rows[h].map((v, i) => (
-                  <Cell key={data.channels[i]} value={v} />
-                ))}
-                <span
-                  ref={(el) => {
-                    scores.current[h] = el;
-                  }}
-                  className="num t-small text-foreground self-center pl-3 text-right"
-                >
-                  {NO_VALUE}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          <div
-            className="mt-3 grid shrink-0 items-stretch outline outline-[var(--primary)]"
-            style={{
-              height: ROW_H,
-              outlineOffset: 2,
-              gridTemplateColumns: template(data.channels.length),
-            }}
-          >
-            <div aria-hidden />
-            <span className="t-small text-primary self-center pr-3 text-right">OBSERVED NOW</span>
-            {data.channels.map((channel, i) => (
-              <div
-                key={channel}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 pt-[10px] pb-3">
+        <ColumnLabels data={data} />
+        <div className="flex min-h-0 flex-1 flex-col">
+          {data.hypotheses.map((name, h) => (
+            <div
+              key={name}
+              className="grid flex-1 items-stretch gap-x-px"
+              style={{
+                minHeight: 15,
+                gridTemplateColumns: template(data.channels.length),
+              }}
+            >
+              <span
                 ref={(el) => {
-                  observed.current[i] = el;
+                  names.current[h] = el;
                 }}
-                className="tween min-w-0 border-y-2 border-transparent"
-                style={{ background: "var(--muted)" }}
-              />
-            ))}
-            <span />
-          </div>
+                className="t-small text-muted-foreground self-center truncate pr-3 text-right"
+              >
+                {name}
+              </span>
+              {data.rows[h].map((v, i) => (
+                <Cell key={data.channels[i]} value={v} />
+              ))}
+              <span
+                ref={(el) => {
+                  scores.current[h] = el;
+                }}
+                className="num t-small text-foreground self-center pl-3 text-right"
+              >
+                {NO_VALUE}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        <div
+          className="mt-3 grid shrink-0 items-stretch gap-x-px outline outline-[var(--primary)]"
+          style={{
+            height: ROW_H,
+            outlineOffset: 2,
+            gridTemplateColumns: template(data.channels.length),
+          }}
+        >
+          <span className="t-small text-primary self-center pr-3 text-right">OBSERVED NOW</span>
+          {data.channels.map((channel, i) => (
+            <div
+              key={channel}
+              ref={(el) => {
+                observed.current[i] = el;
+              }}
+              className="tween min-w-0 border-y-2 border-transparent"
+              style={{ background: "var(--muted)" }}
+            />
+          ))}
+          <span />
         </div>
       </div>
 
@@ -205,18 +216,21 @@ function Cell({ value }: { value: number }) {
 function ColumnLabels({ data }: { data: MatrixData }) {
   return (
     <div
-      className="grid items-end"
-      style={{ height: 78, gridTemplateColumns: template(data.channels.length) }}
+      className="grid shrink-0 items-end gap-x-px"
+      style={{ height: LABEL_BAND_H, gridTemplateColumns: template(data.channels.length) }}
     >
-      <div aria-hidden />
       <div />
       {data.channels.map((channel) => (
-        <div key={channel} className="flex min-w-0 justify-center">
+        <div
+          key={channel}
+          className="flex min-w-0 justify-center"
+          style={{ paddingBottom: LABEL_GUTTER }}
+        >
           <span
             className="label-micro whitespace-nowrap"
             style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
           >
-            {channel}
+            {short(channel)}
           </span>
         </div>
       ))}

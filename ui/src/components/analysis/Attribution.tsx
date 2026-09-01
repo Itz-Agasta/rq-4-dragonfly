@@ -8,7 +8,7 @@
  *
  * Shares are whole percentages summing to exactly 100 by largest remainder. A
  * panel of percentages that sums to 99 is the first thing a sceptical reader
- * checks, and `design.md` 5 says so.
+ * checks.
  *
  * **Gated on detection, for the reason isolation is.** Attribution asks which
  * channels carry the disagreement and never whether there is one, so on a healthy
@@ -19,12 +19,10 @@
  * alone puts the sum of the absolute residuals near eight on an engine with
  * nothing wrong with it.
  *
- * The counterfactual strip beneath is **computed, not written**. The artboard's
- * `If injector-3 flow were nominal -> predicted RUL 210 h` is exactly the right
- * line and the number is already on the wire: take the driver out of the picture
- * and what limits the engine is whichever subsystem runs out next. So the strip
- * names the second-shortest life rather than an authored one, and it moves when
- * the engine does.
+ * The counterfactual strip beneath is **computed, not written**. Take the driver
+ * out of the picture and what limits the engine is whichever subsystem runs out
+ * next, so the strip names the second-shortest life rather than an authored one,
+ * and it moves when the engine does.
  */
 
 import { useRef } from "react";
@@ -37,11 +35,15 @@ import { isFresh, SUBSYSTEMS } from "@/lib/telemetry";
 /** Rows shown. Beyond five the shares are rounding noise. */
 const ROWS = 5;
 
+/** Header text while nothing is ranked. Names the column instead of scoring it. */
+const SCORE_LABEL = "share of total |residual| in sigmas";
+
 export function Attribution({ channels }: { channels: string[] }) {
   const rows = useRef<(HTMLDivElement | null)[]>([]);
   const note = useRef<HTMLSpanElement>(null);
   const score = useRef<HTMLSpanElement>(null);
   const counter = useRef<HTMLSpanElement>(null);
+  const strip = useRef<HTMLDivElement>(null);
 
   useLiveSink((frame) => {
     const twin = frame.twin;
@@ -49,16 +51,27 @@ export function Attribution({ channels }: { channels: string[] }) {
     const d = twin?.detection;
     const fired = d !== undefined && !d.calibrating && (d.anomaly || d.drift);
 
+    // The counterfactual is a prognosis statement, not an attribution one, so it
+    // is gated on the twin and not on detection: a remaining life exists whether
+    // or not a detector has fired. Without a twin the strip is hidden rather than
+    // emptied, because an empty dashed box reads as a panel that failed to load.
+    const live = twin !== null && fresh;
+    if (strip.current) strip.current.style.display = live ? "" : "none";
+    if (live) counterfactual(counter.current, frame);
+
     if (!twin || !fresh || !fired) {
       rows.current.forEach((row) => row && (row.style.display = "none"));
       if (note.current) {
-        note.current.textContent =
-          !twin || !fresh
-            ? "waiting for the twin"
-            : d?.calibrating
-              ? "detector is baselining · nothing to attribute yet"
-              : "no detector has fired · the residual is inside its band";
+        note.current.textContent = !live
+          ? "waiting for the twin"
+          : d?.calibrating
+            ? "detector is baselining · nothing to attribute yet"
+            : "no detector has fired · the residual is inside its band";
       }
+      // Back to naming the column. The score belongs to the ranked rows, and
+      // keeping the last alarm's total beside a panel showing none of them
+      // attributes a number to channels that are no longer on screen.
+      if (score.current) score.current.textContent = SCORE_LABEL;
       return;
     }
     const magnitudes = twin.normalised.map(Math.abs);
@@ -115,7 +128,6 @@ export function Attribution({ channels }: { channels: string[] }) {
       const total = magnitudes.reduce((a, b) => a + b, 0);
       score.current.textContent = `share of score ${fmt(total, 2)}`;
     }
-    counterfactual(counter.current, frame);
   });
 
   return (
@@ -123,7 +135,7 @@ export function Attribution({ channels }: { channels: string[] }) {
       <header className="border-border flex shrink-0 items-baseline justify-between border-b px-4 py-3">
         <h2 className="t-section">Attribution · anomaly score</h2>
         <span ref={score} className="label-micro">
-          share of total |residual| in sigmas
+          {SCORE_LABEL}
         </span>
       </header>
 
@@ -151,7 +163,11 @@ export function Attribution({ channels }: { channels: string[] }) {
         <span ref={note} className="t-small text-muted-foreground" />
 
         {/* Provenance is the dashed rule and the tag, never a hue. */}
-        <div className="border-structure mt-3 flex shrink-0 items-center justify-between gap-4 border border-dashed px-[14px] py-[10px]">
+        <div
+          ref={strip}
+          className="border-structure mt-3 flex shrink-0 items-center justify-between gap-4 border border-dashed px-[14px] py-[10px]"
+          style={{ display: "none" }}
+        >
           <span ref={counter} className="t-body text-foreground min-w-0 text-pretty" />
           <span className="border-structure-hi text-foreground-dim shrink-0 border border-dashed px-[7px] py-[3px] text-[10px] tracking-[0.08em]">
             ◊ INFERRED

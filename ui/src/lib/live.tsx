@@ -15,8 +15,8 @@
  *
  * Traces are redrawn as often as the display can show them. **Text is not.** A
  * four-decimal value rewritten on every 20 Hz frame is not a readable number, it
- * is a flicker with a mean, and `design.md` 5's tabular figures fix the horizontal
- * shiver without touching the rate. Readouts are therefore written at
+ * is a flicker with a mean, and tabular figures fix the horizontal shiver without
+ * touching the rate. Readouts are therefore written at
  * {@link READOUT_HZ}, which is the cadence a mechanical instrument settles at and
  * roughly the fastest a person reads a digit.
  *
