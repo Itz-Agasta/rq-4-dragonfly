@@ -51,6 +51,7 @@ pub mod manifold;
 pub mod oil;
 pub mod output;
 pub mod params;
+pub mod published;
 pub mod thermal;
 pub mod turbine;
 
@@ -398,33 +399,46 @@ mod tests {
         }
     }
 
-    /// The published take-off rating: 132 kW and 550 N.m at the propeller, at a
-    /// crank speed of 3880 rpm, burning 39 litres an hour.
+    /// The published take-off rating, read from [`published`] rather than typed
+    /// here, so that a change to one of those constants cannot pass unnoticed.
+    /// The tolerance is 5% and not 10%: the model was fitted to this point, so a
+    /// looser bound would let a real regression through as a fitting error.
     #[test]
     fn reproduces_the_published_rating_point() {
+        use published as pubd;
         let p = engines::ae330();
         let x = State {
             p_im: p.control.map_setpoint_pa,
             p_em: 3.45e5,
-            omega_e: omega(3880.0),
+            omega_e: omega(pubd::TAKEOFF_RPM_CRANK),
             omega_tc: 14_900.0,
-            ..State::at_rest(atmosphere::isa(0.0).p, 3880.0)
+            ..State::at_rest(atmosphere::isa(0.0).p, pubd::TAKEOFF_RPM_CRANK)
         };
         let o = evaluate(&p, &x, &sea_level(1.0, 0.0));
 
         assert!(
-            (o.power_brake_w - 132_000.0).abs() / 132_000.0 < 0.10,
-            "{} W",
-            o.power_brake_w
+            (o.power_brake_w - pubd::TAKEOFF_POWER_W).abs() / pubd::TAKEOFF_POWER_W < 0.05,
+            "{} W against a published {} W",
+            o.power_brake_w,
+            pubd::TAKEOFF_POWER_W
         );
         assert!(
-            (o.torque_prop - 550.0).abs() / 550.0 < 0.10,
-            "{} N.m",
-            o.torque_prop
+            (o.torque_prop - pubd::MAX_TORQUE_PROP_NM).abs() / pubd::MAX_TORQUE_PROP_NM < 0.05,
+            "{} N.m against a published {} N.m",
+            o.torque_prop,
+            pubd::MAX_TORQUE_PROP_NM
         );
         let lph = o.fuel_litres_per_hour(&p);
-        assert!((lph - 39.0).abs() / 39.0 < 0.10, "{lph} L/h");
-        assert!((o.rpm_prop - 2296.0).abs() < 5.0, "prop {} rpm", o.rpm_prop);
+        assert!(
+            (lph - pubd::FUEL_LPH_AT_FULL).abs() / pubd::FUEL_LPH_AT_FULL < 0.05,
+            "{lph} L/h against a published {} L/h",
+            pubd::FUEL_LPH_AT_FULL
+        );
+        assert!(
+            (o.rpm_prop - pubd::TAKEOFF_RPM_PROP).abs() < 10.0,
+            "prop {} rpm",
+            o.rpm_prop
+        );
 
         let bsfc = o.bsfc_g_per_kwh().unwrap();
         assert!((200.0..280.0).contains(&bsfc), "bsfc {bsfc} g/kWh");

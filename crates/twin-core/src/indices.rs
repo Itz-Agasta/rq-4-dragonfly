@@ -66,6 +66,9 @@ pub struct Auxiliary {
     pub vib_rms_g: f64,
     /// Kurtosis of the vibration signal.
     pub vib_kurtosis: f64,
+    /// Brake power as a fraction of the rating. Carried because the vibration
+    /// baseline moves with load and a threshold without it false-alarms at power.
+    pub load_fraction: f64,
 }
 
 /// One index and the quantity that set it.
@@ -87,9 +90,17 @@ const BUS_NOMINAL_V: f64 = 27.8;
 /// Departure from the nominal bus at which the electrical system has failed, V.
 const BUS_LIMIT_V: f64 = 2.5;
 
-/// Broadband vibration on a healthy engine at cruise, g RMS. **estimated**.
-const VIB_NOMINAL_G: f64 = 1.2;
-/// Vibration at which the mechanical condition is unacceptable, g RMS. **estimated**.
+/// Broadband vibration on a healthy engine at no load and at the rating, g RMS.
+///
+/// A **baseline**, not a limit, and the reason it is two numbers is that a
+/// reciprocating engine's crankcase acceleration rises with the rate of cylinder
+/// pressure rise, so a single figure is the nominal at exactly one power setting
+/// and a false alarm everywhere else. Measured on the simulated channel at 0.75 g
+/// unloaded and 2.04 g at the rating; `dragonfly-sim` pins both.
+const VIB_BASELINE_G: [f64; 2] = [0.75, 2.04];
+/// Vibration at which the mechanical condition is unacceptable, g RMS.
+/// **estimated**, and an absolute machine limit rather than a departure from the
+/// baseline, so the margin genuinely narrows as the engine is worked harder.
 const VIB_LIMIT_G: f64 = 4.0;
 /// Kurtosis of a healthy signal, which is dominated by firing-order tones and so
 /// sits below the 3.0 of a Gaussian. **estimated**; measured at 2.34 on this
@@ -131,8 +142,7 @@ pub fn evaluate(health: &Health, unexplained: &[f64], aux: &Auxiliary) -> [Score
             th::INJECTOR + 3,
         ],
     );
-    out[index::AIR_PATH] =
-        worst_parameter(health, &[th::ETA_VOL, th::ETA_COMPRESSOR, th::ETA_TURBINE]);
+    out[index::AIR_PATH] = air_path(health);
     out[index::THERMAL] = worst_parameter(health, &[th::RADIATOR, th::HEAD_CONDUCTANCE]);
     out[index::LUBRICATION] = worst_parameter(health, &[th::OIL_SUPPLY]);
     out[index::COMBUSTION] = combustion(unexplained);
@@ -165,6 +175,40 @@ fn worst_parameter(health: &Health, members: &[usize]) -> Scored {
         }
     }
     worst
+}
+
+/// Value of the turbomachine efficiency product at which the air path has failed.
+///
+/// One of the pair at its own limit with the other at nominal, which is the same
+/// number both descriptors carry.
+const TURBO_PRODUCT_FAILURE: f64 = 0.85;
+
+/// Air path condition, scored on the combination the measurements can actually
+/// resolve rather than on the individual estimates.
+///
+/// Compressor and turbine efficiency are **not separately identifiable here**. The
+/// turbocharger shaft settles where the two powers balance, and that balance moves
+/// with the product of the efficiencies; the ratio leaves it almost unchanged. So
+/// the filter is nearly indifferent along the ridge `eta_c` up and `eta_t` down,
+/// settles anywhere on it, and scoring the worst of the two individually reported a
+/// healthy engine at 91 on one run and 100 on the next, with nothing wrong either
+/// time. Scoring the product reports what was measured and discards what was not.
+///
+/// The consequence to know: this cannot say **which** of the two has degraded, and
+/// it should not, because the instrumentation on this bus cannot either. Separating
+/// them needs a compressor outlet temperature, which no message here carries.
+/// Volumetric efficiency stays separate; it is identifiable against mass air flow.
+fn air_path(health: &Health) -> Scored {
+    let vol = worst_parameter(health, &[th::ETA_VOL]);
+    let product = health.values[th::ETA_COMPRESSOR] * health.values[th::ETA_TURBINE];
+    let consumed = ((1.0 - product) / (1.0 - TURBO_PRODUCT_FAILURE)).max(0.0);
+    let turbo = Scored {
+        value: (100.0 * (1.0 - consumed)).clamp(0.0, 100.0),
+        driver: "eta_c x eta_t",
+        driver_value: product,
+        driver_limit: TURBO_PRODUCT_FAILURE,
+    };
+    if turbo.value <= vol.value { turbo } else { vol }
 }
 
 /// Combustion quality, from what the health parameters could not explain.
@@ -217,13 +261,31 @@ fn electrical(aux: &Auxiliary) -> Scored {
     }
 }
 
+/// Broadband vibration a healthy engine produces at this load, g RMS.
+///
+/// Linear between the two measured endpoints. The true curve is a hyperbola,
+/// because the level is the tones and the noise floor added in quadrature, but it
+/// departs from the chord by at most 1.1% over the whole load range, which is
+/// three hundredths of an index point.
+fn vibration_baseline(load_fraction: f64) -> f64 {
+    let l = load_fraction.clamp(0.0, 1.0);
+    VIB_BASELINE_G[0] + l * (VIB_BASELINE_G[1] - VIB_BASELINE_G[0])
+}
+
 /// Mechanical condition from the vibration channel. Threshold monitoring.
 ///
 /// Both features are scored and the worse one wins, because kurtosis rises for an
 /// impulsive defect while the broadband level is still flat: a few large excursions
 /// move a fourth moment long before they move a second one.
+///
+/// The broadband level is scored against a **load-scheduled** baseline. Against one
+/// fixed nominal this index read 72 on a healthy engine at full power, because the
+/// nominal was the cruise level and a healthy climb sits near 2.0 g: a false alarm
+/// on every full-power beat of a demonstration. Widening the limit would have hidden
+/// a real defect at cruise instead, so the baseline moves and the limit does not.
 fn mechanical(aux: &Auxiliary) -> Scored {
-    let rms = 1.0 - (aux.vib_rms_g - VIB_NOMINAL_G).max(0.0) / (VIB_LIMIT_G - VIB_NOMINAL_G);
+    let nominal = vibration_baseline(aux.load_fraction);
+    let rms = 1.0 - (aux.vib_rms_g - nominal).max(0.0) / (VIB_LIMIT_G - nominal);
     let kurtosis =
         1.0 - (aux.vib_kurtosis - KURTOSIS_NOMINAL).max(0.0) / (KURTOSIS_LIMIT - KURTOSIS_NOMINAL);
     if kurtosis < rms {
@@ -248,11 +310,14 @@ mod tests {
     use super::*;
     use crate::channels::CHANNELS;
 
+    /// A healthy engine at the cruise load the reference channels are quoted at.
     fn healthy_aux() -> Auxiliary {
+        let load = 0.35;
         Auxiliary {
             bus_v: 27.8,
-            vib_rms_g: 1.2,
+            vib_rms_g: vibration_baseline(load),
             vib_kurtosis: KURTOSIS_NOMINAL,
+            load_fraction: load,
         }
     }
 
@@ -346,6 +411,93 @@ mod tests {
         let scored = evaluate(&Health::nominal(), &[0.0; CHANNELS], &impulsive);
         assert_eq!(scored[index::MECHANICAL].driver, "kurtosis");
         assert!((scored[index::MECHANICAL].value - 50.0).abs() < 1e-9);
+    }
+
+    /// The false alarm this schedule exists to remove. A healthy engine at full
+    /// power sits near 2.0 g, and against the old fixed 1.2 g cruise nominal that
+    /// scored 70: an alarm on every full-power beat of the demonstration.
+    #[test]
+    fn a_healthy_engine_is_not_a_mechanical_alarm_at_any_load() {
+        for load in [0.0, 0.35, 0.7, 1.0] {
+            let aux = Auxiliary {
+                vib_rms_g: vibration_baseline(load),
+                load_fraction: load,
+                ..healthy_aux()
+            };
+            let scored = mechanical(&aux);
+            assert!(
+                (scored.value - 100.0).abs() < 1e-9,
+                "load {load}: {}",
+                scored.value
+            );
+        }
+
+        // A fixed cruise nominal is what produced the false alarm, and the
+        // arithmetic is here so nobody reintroduces it thinking it was harmless.
+        let at_rating = vibration_baseline(1.0);
+        let against_cruise_nominal =
+            100.0 * (1.0 - (at_rating - vibration_baseline(0.35)) / (VIB_LIMIT_G - 1.2));
+        assert!(
+            (65.0..75.0).contains(&against_cruise_nominal),
+            "{against_cruise_nominal}"
+        );
+    }
+
+    /// A real defect still has to show, and the load schedule must not swallow it.
+    #[test]
+    fn a_rough_engine_still_scores_badly_at_full_power() {
+        let aux = Auxiliary {
+            vib_rms_g: 3.0,
+            load_fraction: 1.0,
+            ..healthy_aux()
+        };
+        let scored = mechanical(&aux);
+        assert_eq!(scored.driver, "vibration");
+        assert!(scored.value < 55.0, "{}", scored.value);
+    }
+
+    /// Compressor and turbine efficiency trade off against each other along a
+    /// ridge the shaft power balance barely sees, so the filter settles anywhere
+    /// on it. Scoring them individually reported 91 and then 100 on two runs of a
+    /// healthy engine; scoring the product reports what was actually measured.
+    #[test]
+    fn the_air_path_ignores_the_ridge_the_filter_wanders_along() {
+        let mut health = Health::nominal();
+        health.values[th::ETA_COMPRESSOR] = 0.9865;
+        health.values[th::ETA_TURBINE] = 1.0135;
+        let scored = air_path(&health);
+        assert!(scored.value > 99.0, "{}", scored.value);
+        assert_eq!(scored.driver, "eta_c x eta_t");
+
+        // Scored one at a time, that same estimate calls a healthy engine 91.
+        let individually =
+            worst_parameter(&health, &[th::ETA_VOL, th::ETA_COMPRESSOR, th::ETA_TURBINE]);
+        assert!(
+            (90.0..93.0).contains(&individually.value),
+            "{}",
+            individually.value
+        );
+    }
+
+    /// What the product cannot do is say which of the pair moved, and it must not
+    /// pretend to. What it must do is notice that the pair moved together.
+    #[test]
+    fn the_air_path_still_sees_a_turbocharger_losing_efficiency() {
+        let mut health = Health::nominal();
+        health.values[th::ETA_COMPRESSOR] = 0.90;
+        let scored = air_path(&health);
+        assert!((30.0..35.0).contains(&scored.value), "{}", scored.value);
+        assert!((scored.driver_value - 0.90).abs() < 1e-12);
+    }
+
+    /// Volumetric efficiency is identifiable against mass air flow, so it stays a
+    /// parameter of its own and can still be the thing that sets the index.
+    #[test]
+    fn volumetric_efficiency_is_reported_separately_from_the_turbocharger() {
+        let mut health = Health::nominal();
+        health.values[th::ETA_VOL] = 0.90;
+        let scored = air_path(&health);
+        assert_eq!(scored.driver, "eta_vol");
     }
 
     #[test]

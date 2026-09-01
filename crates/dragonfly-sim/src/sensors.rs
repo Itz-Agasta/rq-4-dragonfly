@@ -462,6 +462,28 @@ mod tests {
     /// A Gaussian has a kurtosis of 3, so a signal that is mostly tone plus a
     /// little noise must sit below that. If this ever reads 3.0 exactly the
     /// harmonics have stopped being generated.
+    /// The healthy baseline `twin_core::indices::VIB_BASELINE_G` is scored
+    /// against, pinned at both ends.
+    ///
+    /// The two live in different crates because one is the plant and the other is
+    /// the monitor, and a monitor that imports its nominal from the machine it
+    /// watches is not measuring anything. This test is the seam: change the
+    /// synthesis here and it fails, naming the constants that have to move with it.
+    #[test]
+    fn the_healthy_vibration_baseline_matches_what_the_health_index_expects() {
+        for (load, expected) in [(0.0, 0.75), (1.0, 2.04)] {
+            let mut vib = VibrationChannel::new(Rng::new(3));
+            for _ in 0..400 {
+                vib.advance(3720.0, load, 0.0, 0.05);
+            }
+            let rms = vib.rms();
+            assert!(
+                (rms - expected).abs() / expected < 0.02,
+                "load {load}: {rms} g against a baseline of {expected} g"
+            );
+        }
+    }
+
     #[test]
     fn the_vibration_channel_produces_plausible_statistics() {
         let mut vib = VibrationChannel::new(Rng::new(3));

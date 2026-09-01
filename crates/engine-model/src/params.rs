@@ -319,6 +319,36 @@ pub struct Limits {
     /// Rated brake power, W. The denominator an engine controller divides by when
     /// it broadcasts engine load as a percentage.
     pub rated_power_w: f64,
+    /// The certified redline set: what a conventional threshold monitor watches.
+    pub redline: Redline,
+}
+
+/// Operating limits a conventional cockpit gauge or threshold monitor alarms on.
+///
+/// These are here so the twin can be compared against the monitor it replaces on
+/// the same engine and the same run, which is what turns "earlier than a threshold"
+/// from a claim into a measured lead time. They are limits, not model parameters:
+/// nothing in the physics reads them, and crossing one is a statement about the
+/// aircraft rather than about the equations.
+///
+/// Oil and coolant limits are **published**, from EASA TCDS E.200 section IV for the
+/// E4P. Exhaust and head limits are **estimated**: the certificate publishes neither,
+/// because on this engine they are managed by the EECU's own fuelling limiter rather
+/// than presented to a pilot.
+#[derive(Clone, Copy, Debug, Deserialize)]
+pub struct Redline {
+    /// Maximum oil temperature, K. **published**, 139 C.
+    pub oil_t_max_k: f64,
+    /// Minimum oil pressure at maximum continuous power, Pa. **published**, 2.5 bar.
+    pub oil_p_min_pa: f64,
+    /// Maximum oil pressure, Pa. **published**, 6.5 bar.
+    pub oil_p_max_pa: f64,
+    /// Maximum coolant temperature, K. **published**, 100 C.
+    pub coolant_t_max_k: f64,
+    /// Maximum exhaust gas temperature at any cylinder, K. **estimated**.
+    pub egt_max_k: f64,
+    /// Maximum cylinder head temperature, K. **estimated**.
+    pub cht_max_k: f64,
 }
 
 /// A complete engine.

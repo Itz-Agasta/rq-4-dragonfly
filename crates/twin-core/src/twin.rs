@@ -39,9 +39,11 @@ use nalgebra::{DMatrix, DVector};
 use serde::Serialize;
 
 use crate::channels::{self, CHANNELS, Channel, Measurement, TABLE};
+use crate::detect::{Detection, Detector};
 use crate::health::{self, DESCRIPTORS, Health, PARAMS};
 use crate::indices::{self, INDICES, Scored};
 use crate::nominal::Nominal;
+use crate::signature::{Diagnosis, Signatures};
 use crate::ukf::{FilterError, Spread, Ukf};
 
 /// Layout of the augmented state.
@@ -188,6 +190,12 @@ pub struct TwinOutput {
     pub health_driver_value: [f64; INDICES],
     /// Value of that quantity at which the subsystem fails.
     pub health_driver_limit: [f64; INDICES],
+    /// What the anomaly tests made of this frame, and how far ahead of the
+    /// conventional redline monitor they are.
+    pub detection: Detection,
+    /// Which fault the residual pattern points at. Only meaningful once
+    /// `detection` says there is something to isolate; see `signature`.
+    pub diagnosis: Diagnosis,
 }
 
 /// The estimator.
@@ -202,6 +210,8 @@ pub struct Twin {
     transient: f64,
     quality: Vec<f64>,
     locked_since: Option<f64>,
+    detector: Detector,
+    signatures: Signatures,
     output: TwinOutput,
 }
 
@@ -233,6 +243,13 @@ impl Twin {
 
         Self {
             nominal: Nominal::new(params.clone()),
+            // Generating the signature matrix runs the model to steady state once
+            // per hypothesis. In release that is tens of milliseconds at startup;
+            // in a debug build it is seconds, which is why `just core` builds
+            // release. It is done here rather than lazily so that a matrix and the
+            // parameters it was generated from can never disagree.
+            signatures: Signatures::generate(&params),
+            detector: Detector::new(),
             params,
             tuning,
             filter: None,
@@ -361,10 +378,25 @@ impl Twin {
             self.output.normalised[i] = residual / sigma;
         }
 
+        self.output.detection = self.detector.update(
+            m.t_s,
+            &self.output.normalised,
+            m,
+            &self.params.limits.redline,
+        );
+        // Isolation runs on the residual pattern only once detection says there is
+        // something to isolate. Asked "which fault" about a healthy engine it names
+        // whichever one the noise happens to lie nearest; see `signature::diagnose`.
+        let flagged = self.output.detection.drift || self.output.detection.anomaly;
+        self.output.diagnosis = self.signatures.diagnose(&self.output.normalised, flagged);
+
         let health = Health::from_slice(&self.output.theta);
         let unexplained = innovation.normalised();
-        let scored: [Scored; INDICES] =
-            indices::evaluate(&health, unexplained.as_slice(), &m.auxiliary());
+        let scored: [Scored; INDICES] = indices::evaluate(
+            &health,
+            unexplained.as_slice(),
+            &m.auxiliary(self.params.limits.rated_power_w),
+        );
         for (i, s) in scored.iter().enumerate() {
             self.output.health[i] = s.value;
             self.output.health_driver[i] = s.driver;
@@ -639,6 +671,20 @@ fn blank_output() -> TwinOutput {
         theta: std::array::from_fn(|i| health::DESCRIPTORS[i].nominal),
         theta_sigma: [f64::NAN; PARAMS],
         innovation_pct: f64::NAN,
+        detection: Detection::default(),
+        // A blank diagnosis is the null hypothesis at certainty, not an empty one:
+        // before the first frame the honest statement about the engine is that
+        // nothing has been found wrong with it.
+        diagnosis: Diagnosis {
+            posterior: {
+                let mut p = [0.0; crate::signature::HYPOTHESES];
+                p[crate::signature::NOMINAL] = 1.0;
+                p
+            },
+            match_score: [0.0; crate::signature::HYPOTHESES],
+            best: crate::signature::NOMINAL,
+            rejection: [""; crate::signature::HYPOTHESES],
+        },
         health: [f64::NAN; INDICES],
         health_driver: [""; INDICES],
         health_driver_value: [f64::NAN; INDICES],

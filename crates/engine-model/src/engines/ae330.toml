@@ -1,6 +1,23 @@
-# Turbocharged heavy-fuel aero piston engine, 1991 cm3, four cylinders in line,
+# Austro Engine E4P, sales name AE330. 1991 cm3, four cylinders in line,
 # common-rail direct injection, wastegated fixed-geometry turbocharger,
-# intercooled, FADEC, 1:1.69 reduction gearbox, rated to 32,000 ft.
+# intercooled, FADEC, 1:1.69 reduction gearbox.
+#
+# WHY THIS ENGINE. TAPAS BH-201 flies it. Early prototypes carried NPO-Saturn
+# 36MT turboprops and a Rotax 914; from prototype AF-5 the airframe carries twin
+# 180 hp Austro E4P units, and Archer-NG inherits them. The indigenous engine
+# that replaces it, the VRDE and Jayem Automotives 180 hp, is a different machine
+# and not a licence build of this one: Jayem describe a 2.2 litre platform where
+# the E4 is 1991 cm3 on a Mercedes-Benz OM640 block. It is not modelled here
+# because five numbers are published about it and none of them is a curve, a bore,
+# a stroke or a map. This engine has a type certificate, 5.5 million flight hours
+# and a published rating point, so every claim below can be checked by a reader.
+#
+# CEILING. The type certificate limits the E4P to 20,000 ft and the E4 to
+# 18,000 ft. The model is swept to 32,000 ft anyway, because that is the mission
+# envelope a MALE airframe needs and the figure the indigenous programme quotes,
+# and `docs/model_validation.md` marks everything above the certified ceiling as
+# extrapolation. TAPAS has demonstrated 18 h at 28,000 ft on these engines.
+# Do not quote the sweep above 20,000 ft as certified performance.
 #
 # Numbers marked `published` come from the EASA type certificate data sheet E.200
 # for the Austro Engine E4 series and from the manufacturer factsheet, or from the
@@ -16,7 +33,7 @@
 #
 # https://www.easa.europa.eu/en/downloads/7617/en
 
-name = "E4P-class 180 hp heavy-fuel aero diesel"
+name = "Austro Engine E4P (AE330), 180 hp heavy-fuel aero diesel"
 
 [geometry]
 displacement_m3 = 1.991e-3 # published, 1991 cm3
@@ -242,3 +259,18 @@ bypass_fraction = 0.08 # estimated
 rpm_max = 4220.0 # published, maximum engine overspeed
 lambda_min = 1.30 # estimated, smoke limit for a modern common-rail diesel
 rated_power_w = 132000.0 # published, take-off rating at 3880 rpm
+
+# The redline set a conventional threshold monitor alarms on. Carried so the twin's
+# detection can be timed against the monitor it replaces, on the same run. Oil and
+# coolant come from EASA TCDS E.200 section IV, for the E4P specifically: the E4
+# allows 140 C oil and 105 C coolant, and quoting those here would be the wrong
+# variant. Exhaust and head are estimated, because the certificate publishes neither;
+# on this engine both are held by the EECU's fuelling limiter rather than shown to a
+# pilot, so there is no certificated number to cite.
+[limits.redline]
+oil_t_max_k = 412.15 # published, 139 C
+oil_p_min_pa = 2.5e5 # published, 2.5 bar at maximum continuous
+oil_p_max_pa = 6.5e5 # published, 6.5 bar
+coolant_t_max_k = 373.15 # published, 100 C
+egt_max_k = 1123.15 # estimated, 850 C, the top of the band a turbo diesel runs at
+cht_max_k = 453.15 # estimated, 180 C at the head metal for an aluminium head

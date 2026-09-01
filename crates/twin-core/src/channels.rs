@@ -327,12 +327,22 @@ impl Measurement {
     }
 
     /// What the health indices need that the model does not describe.
+    ///
+    /// Takes the rating rather than reading a stored one, because the load
+    /// fraction is derived here from measured torque and speed and the vibration
+    /// index is wrong without it. Passing it in is what stops a caller forgetting.
     #[must_use]
-    pub fn auxiliary(&self) -> crate::indices::Auxiliary {
+    pub fn auxiliary(&self, rated_power_w: f64) -> crate::indices::Auxiliary {
+        let brake_w = self.torque_nm * self.rpm * std::f64::consts::TAU / 60.0;
         crate::indices::Auxiliary {
             bus_v: self.bus_v,
             vib_rms_g: self.vib_rms_g,
             vib_kurtosis: self.vib_kurtosis,
+            load_fraction: if rated_power_w > 0.0 {
+                (brake_w / rated_power_w).clamp(0.0, 1.2)
+            } else {
+                0.0
+            },
         }
     }
 

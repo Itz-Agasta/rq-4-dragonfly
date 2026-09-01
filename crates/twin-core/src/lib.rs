@@ -12,11 +12,15 @@
 #![forbid(unsafe_code)]
 
 pub mod channels;
+pub mod detect;
 pub mod health;
 pub mod indices;
 pub mod nominal;
+pub mod signature;
 pub mod twin;
 pub mod ukf;
 
 pub use channels::Measurement;
+pub use detect::{Detection, Detector};
+pub use signature::{Diagnosis, Signatures};
 pub use twin::{Tuning, Twin, TwinOutput};
