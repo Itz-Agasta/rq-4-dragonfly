@@ -364,7 +364,11 @@ impl Twin {
         let health = Health::from_slice(&self.output.theta);
         let unexplained = innovation.normalised();
         let scored: [Scored; INDICES] =
-            indices::evaluate(&health, unexplained.as_slice(), &m.auxiliary());
+            indices::evaluate(
+                &health,
+                unexplained.as_slice(),
+                &m.auxiliary(self.params.limits.rated_power_w),
+            );
         for (i, s) in scored.iter().enumerate() {
             self.output.health[i] = s.value;
             self.output.health_driver[i] = s.driver;
