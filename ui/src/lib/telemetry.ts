@@ -113,6 +113,47 @@ export interface TwinOutput {
   health_driver_value: number[];
   /** Value of that quantity at which the subsystem fails. */
   health_driver_limit: number[];
+  /** What the anomaly tests made of this frame. */
+  detection: Detection;
+}
+
+/**
+ * The anomaly tests and the conventional monitor they are timed against.
+ *
+ * Mirrors `detect::Detection` in `twin-core`. `drift` is the one that catches the
+ * demonstration fault: a coked injector never makes a single frame anomalous, so
+ * `anomaly` stays false throughout and the CUSUM is what fires.
+ */
+export interface Detection {
+  /** Mahalanobis distance of the residual vector. */
+  distance: number;
+  /** Distance a healthy engine exceeds one frame in a thousand. */
+  distance_limit: number;
+  /** Largest accumulated CUSUM excursion across channels. */
+  cusum: number;
+  /** Excursion at which a channel is declared drifted. */
+  cusum_limit: number;
+  /** Channel carrying that excursion. */
+  cusum_channel: string;
+  /**
+   * Whether the standing model bias is still being measured, for the first 60 s.
+   *
+   * No excursion accumulates while this is true, so `drift: false` says nothing
+   * about the engine. A panel must show "calibrating" rather than "no drift".
+   */
+  calibrating: boolean;
+  /** Whether this frame is an outlier. */
+  anomaly: boolean;
+  /** Whether some channel has drifted persistently. */
+  drift: boolean;
+  /** Mission time the drift alarm latched, seconds, or null. */
+  drift_since: number | null;
+  /** Mission time the conventional redline tripped, seconds, or null. */
+  redline_since: number | null;
+  /** Which limit that was, empty until one trips. */
+  redline_channel: string;
+  /** Seconds the drift alarm preceded the redline, or null while either is absent. */
+  lead_time_s: number | null;
 }
 
 /**

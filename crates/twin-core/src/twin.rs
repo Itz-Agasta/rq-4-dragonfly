@@ -39,6 +39,7 @@ use nalgebra::{DMatrix, DVector};
 use serde::Serialize;
 
 use crate::channels::{self, CHANNELS, Channel, Measurement, TABLE};
+use crate::detect::{Detection, Detector};
 use crate::health::{self, DESCRIPTORS, Health, PARAMS};
 use crate::indices::{self, INDICES, Scored};
 use crate::nominal::Nominal;
@@ -188,6 +189,9 @@ pub struct TwinOutput {
     pub health_driver_value: [f64; INDICES],
     /// Value of that quantity at which the subsystem fails.
     pub health_driver_limit: [f64; INDICES],
+    /// What the anomaly tests made of this frame, and how far ahead of the
+    /// conventional redline monitor they are.
+    pub detection: Detection,
 }
 
 /// The estimator.
@@ -202,6 +206,7 @@ pub struct Twin {
     transient: f64,
     quality: Vec<f64>,
     locked_since: Option<f64>,
+    detector: Detector,
     output: TwinOutput,
 }
 
@@ -233,6 +238,7 @@ impl Twin {
 
         Self {
             nominal: Nominal::new(params.clone()),
+            detector: Detector::new(),
             params,
             tuning,
             filter: None,
@@ -360,6 +366,13 @@ impl Twin {
             self.output.sigma[i] = sigma;
             self.output.normalised[i] = residual / sigma;
         }
+
+        self.output.detection = self.detector.update(
+            m.t_s,
+            &self.output.normalised,
+            m,
+            &self.params.limits.redline,
+        );
 
         let health = Health::from_slice(&self.output.theta);
         let unexplained = innovation.normalised();
@@ -643,6 +656,7 @@ fn blank_output() -> TwinOutput {
         theta: std::array::from_fn(|i| health::DESCRIPTORS[i].nominal),
         theta_sigma: [f64::NAN; PARAMS],
         innovation_pct: f64::NAN,
+        detection: Detection::default(),
         health: [f64::NAN; INDICES],
         health_driver: [""; INDICES],
         health_driver_value: [f64::NAN; INDICES],
