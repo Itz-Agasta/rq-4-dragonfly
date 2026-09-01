@@ -6,10 +6,14 @@
 
 use crate::EngineParams;
 
-/// Parameter file for the 180 hp heavy-fuel aero diesel, as text.
+/// Parameter file for the Austro Engine E4P, as text.
 pub const AE330_TOML: &str = include_str!("ae330.toml");
 
-/// The 180 hp heavy-fuel aero diesel.
+/// The Austro Engine E4P, sales name AE330: 180 hp heavy-fuel aero diesel.
+///
+/// This is the engine TAPAS BH-201 flies from prototype AF-5 onward. The header
+/// of `ae330.toml` says why it is modelled rather than the indigenous engine
+/// that replaces it, and what is published about each.
 ///
 /// # Panics
 /// Panics if the compiled-in parameter file is invalid, which is a build-time
