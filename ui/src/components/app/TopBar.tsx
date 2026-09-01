@@ -45,7 +45,7 @@ export function TopBar({ screen }: { screen: string }) {
   return (
     <header className="border-border flex h-10 min-w-0 shrink-0 items-stretch border-b">
       <div className="flex shrink-0 items-center gap-[13px] pr-4 pl-6">
-        <span className="text-[16px] leading-none font-medium tracking-[0.12em]">{screen}</span>
+        <h1 className="text-[16px] leading-none font-medium tracking-[0.12em]">{screen}</h1>
         <Rule />
         <span className="text-muted-foreground text-[11px] tracking-[0.06em]">{AIRFRAME}</span>
       </div>

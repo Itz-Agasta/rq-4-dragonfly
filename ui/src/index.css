@@ -362,6 +362,32 @@
   /* .label-micro (10px, uppercase, tracked) is defined above. */
 
   /* ---------------------------------------------------------------------
+     tween: carries a bar between readouts.
+
+     Readouts are written at 5 Hz so a digit can be read; see lib/live.tsx. A
+     bar is not a digit, and stepped five times a second it reads as a stutter
+     rather than as a value. One linear tween over exactly one readout period
+     carries the geometry between samples, so the bar is continuous while the
+     number beside it stays legible.
+
+     Linear, and exactly one period: eased or longer and the bar is still
+     travelling when its next value lands, which puts the graphic behind the
+     digit it belongs to. This is showing the data, not decorating it, which is
+     why it is not the ambient motion design.md 9 forbids.
+     --------------------------------------------------------------------- */
+  .tween {
+    transition:
+      width 200ms linear,
+      left 200ms linear,
+      background-color 200ms linear;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tween {
+      transition: none;
+    }
+  }
+
+  /* ---------------------------------------------------------------------
      provenance — line style + tag, never hue. keeps colour for alarm.
      --------------------------------------------------------------------- */
   .inferred {
