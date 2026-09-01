@@ -27,7 +27,7 @@ types-rust:
     cargo check --workspace --all-targets
 
 types-ui:
-    pnpm -F ui exec tsc --noEmit
+    pnpm -F ui exec tsgo -b --noEmit
 
 types: types-rust types-ui
 

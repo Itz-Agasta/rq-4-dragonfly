@@ -20,7 +20,9 @@ export class Ring {
   private head = -1;
   private filled = 0;
 
-  constructor(readonly capacity: number) {
+  readonly capacity: number;
+  constructor(capacity: number) {
+    this.capacity = capacity;
     this.buf = new Float64Array(capacity * 2);
   }
 

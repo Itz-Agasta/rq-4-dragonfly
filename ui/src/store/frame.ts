@@ -104,7 +104,7 @@ export const CHANNELS: Readonly<Record<string, Channel>> = Object.fromEntries(
       unit: "rpm",
       dp: 0,
       source: "engine_ms",
-      get: (f) => f.rpm,
+      get: (f: Frame) => f.rpm,
     },
     {
       id: "map",
@@ -112,7 +112,7 @@ export const CHANNELS: Readonly<Record<string, Channel>> = Object.fromEntries(
       unit: "hPa",
       dp: 0,
       source: "engine_ms",
-      get: (f) => f.map_pa / PA_PER_HPA,
+      get: (f: Frame) => f.map_pa / PA_PER_HPA,
     },
     {
       id: "boost",
@@ -120,7 +120,7 @@ export const CHANNELS: Readonly<Record<string, Channel>> = Object.fromEntries(
       unit: "bar",
       dp: 2,
       source: "engine_ms",
-      get: (f) => f.boost_pa / PA_PER_BAR,
+      get: (f: Frame) => f.boost_pa / PA_PER_BAR,
     },
     {
       id: "oil_p",
@@ -128,7 +128,7 @@ export const CHANNELS: Readonly<Record<string, Channel>> = Object.fromEntries(
       unit: "bar",
       dp: 2,
       source: "engine_ms",
-      get: (f) => f.oil_p_pa / PA_PER_BAR,
+      get: (f: Frame) => f.oil_p_pa / PA_PER_BAR,
     },
     {
       id: "oil_t",
@@ -136,7 +136,7 @@ export const CHANNELS: Readonly<Record<string, Channel>> = Object.fromEntries(
       unit: "K",
       dp: 0,
       source: "engine_ms",
-      get: (f) => f.oil_t_k,
+      get: (f: Frame) => f.oil_t_k,
     },
     {
       id: "coolant_t",
@@ -144,7 +144,7 @@ export const CHANNELS: Readonly<Record<string, Channel>> = Object.fromEntries(
       unit: "K",
       dp: 0,
       source: "engine_ms",
-      get: (f) => f.coolant_t_k,
+      get: (f: Frame) => f.coolant_t_k,
     },
     {
       id: "lambda",
@@ -152,7 +152,7 @@ export const CHANNELS: Readonly<Record<string, Channel>> = Object.fromEntries(
       unit: "",
       dp: 2,
       source: "engine_ms",
-      get: (f) => f.lambda,
+      get: (f: Frame) => f.lambda,
     },
     {
       id: "fuel_flow",
@@ -160,7 +160,7 @@ export const CHANNELS: Readonly<Record<string, Channel>> = Object.fromEntries(
       unit: "L/h",
       dp: 1,
       source: "engine_ms",
-      get: (f) => f.fuel_flow_lph,
+      get: (f: Frame) => f.fuel_flow_lph,
     },
     {
       id: "load",
@@ -168,7 +168,7 @@ export const CHANNELS: Readonly<Record<string, Channel>> = Object.fromEntries(
       unit: "%",
       dp: 0,
       source: "engine_ms",
-      get: (f) => f.load_pct,
+      get: (f: Frame) => f.load_pct,
     },
     {
       id: "tc_rpm",
@@ -176,7 +176,7 @@ export const CHANNELS: Readonly<Record<string, Channel>> = Object.fromEntries(
       unit: "rpm",
       dp: 0,
       source: "auxiliary_ms",
-      get: (f) => f.tc_rpm,
+      get: (f: Frame) => f.tc_rpm,
     },
     {
       id: "maf",
@@ -184,7 +184,7 @@ export const CHANNELS: Readonly<Record<string, Channel>> = Object.fromEntries(
       unit: "kg/s",
       dp: 3,
       source: "auxiliary_ms",
-      get: (f) => f.maf_kgs,
+      get: (f: Frame) => f.maf_kgs,
     },
     {
       id: "wastegate",
@@ -192,7 +192,7 @@ export const CHANNELS: Readonly<Record<string, Channel>> = Object.fromEntries(
       unit: "",
       dp: 2,
       source: "auxiliary_ms",
-      get: (f) => f.wastegate,
+      get: (f: Frame) => f.wastegate,
     },
     {
       id: "vib",
@@ -200,7 +200,7 @@ export const CHANNELS: Readonly<Record<string, Channel>> = Object.fromEntries(
       unit: "g",
       dp: 2,
       source: "auxiliary_ms",
-      get: (f) => f.vib_rms_g,
+      get: (f: Frame) => f.vib_rms_g,
     },
     {
       id: "bus_v",
@@ -208,7 +208,7 @@ export const CHANNELS: Readonly<Record<string, Channel>> = Object.fromEntries(
       unit: "V",
       dp: 1,
       source: "power_ms",
-      get: (f) => f.bus_v,
+      get: (f: Frame) => f.bus_v,
     },
     {
       id: "altitude",
@@ -216,7 +216,7 @@ export const CHANNELS: Readonly<Record<string, Channel>> = Object.fromEntries(
       unit: "ft",
       dp: 0,
       source: "air_data_ms",
-      get: (f) => metresToFeet(f.altitude_m),
+      get: (f: Frame) => metresToFeet(f.altitude_m),
     },
     {
       id: "oat",
@@ -224,7 +224,7 @@ export const CHANNELS: Readonly<Record<string, Channel>> = Object.fromEntries(
       unit: "°C",
       dp: 0,
       source: "air_data_ms",
-      get: (f) => kelvinToCelsius(f.oat_k),
+      get: (f: Frame) => kelvinToCelsius(f.oat_k),
     },
     {
       id: "ias",
@@ -232,7 +232,7 @@ export const CHANNELS: Readonly<Record<string, Channel>> = Object.fromEntries(
       unit: "kt",
       dp: 0,
       source: "air_data_ms",
-      get: (f) => msToKnots(f.ias_ms),
+      get: (f: Frame) => msToKnots(f.ias_ms),
     },
     ...cylinder("egt", "EGT", "K", 0, (f) => f.egt_k),
     ...cylinder("cht", "CHT", "K", 0, (f) => f.cht_k),
