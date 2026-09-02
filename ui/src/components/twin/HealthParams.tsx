@@ -68,8 +68,10 @@ export function HealthParams({ parameters }: { parameters: Parameter[] }) {
       if (value) value.textContent = Number.isFinite(theta) ? fmt(theta, 3) : NO_VALUE;
 
       // Declining per the fitted trend, which is also what gives it a remaining
-      // life. A parameter with no fit yet is steady, not falling.
-      const rul = frame.prognosis?.parameter[i];
+      // life. A parameter with no fit yet is steady, not falling, and a fit from
+      // a feed that has since died is not current: gated on `live` alongside the
+      // value, or a row shows an accented falling arrow beside a dash.
+      const rul = live ? frame.prognosis?.parameter[i] : undefined;
       const declining = rul !== undefined && rul.hours !== null;
       value?.toggleAttribute("data-alarm", declining);
       name?.toggleAttribute("data-alarm", declining);

@@ -203,6 +203,7 @@ export function PairedCell({ index, grow, syncKey }: PairedCellProps) {
   const twinRef = useRef<HTMLSpanElement>(null);
   const residRef = useRef<HTMLSpanElement>(null);
   const nameRef = useRef<HTMLSpanElement>(null);
+  const staleRef = useRef<HTMLSpanElement>(null);
 
   const ch = COMPARED[index]!;
 
@@ -318,6 +319,17 @@ export function PairedCell({ index, grow, syncKey }: PairedCellProps) {
   useLiveSink((frame) => {
     const twin = frame.twin;
     const fresh = isFresh(frame.ages[ch.source]);
+
+    // The plots keep their history when the feed dies, because history is what
+    // happened and deleting it would be a lie of a different kind. What they must
+    // not do is keep looking current: a frozen trace is indistinguishable from a
+    // steady one, so the cell says the word and dims the canvases, which is the
+    // same pair `Strip` uses and the same `data-stale` opacity the theme defines.
+    if (staleRef.current) staleRef.current.hidden = fresh && twin !== null;
+    for (const host of [traceHost.current, residualHost.current]) {
+      host?.toggleAttribute("data-stale", !fresh || twin === null);
+    }
+
     const write = (el: HTMLSpanElement | null, text: string, alarm = false) => {
       if (!el) return;
       if (el.textContent !== text) el.textContent = text;
@@ -359,6 +371,9 @@ export function PairedCell({ index, grow, syncKey }: PairedCellProps) {
             {ch.unit || "ratio"}
             <span className="text-structure mx-[6px]">·</span>
             {ch.note}
+            <span ref={staleRef} hidden className="text-primary ml-[6px]">
+              · STALE
+            </span>
           </span>
         </div>
         <div className="flex shrink-0 items-baseline gap-5">
