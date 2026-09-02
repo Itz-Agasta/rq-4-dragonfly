@@ -14,8 +14,8 @@ import { useRef } from "react";
 import { useNavigate } from "react-router";
 
 import { useFaultCylinder } from "@/components/ops/fault";
+import { InjectDrawer } from "@/components/ops/InjectDrawer";
 import { SchematicDrawing } from "@/components/ops/SchematicDrawing";
-import { Button } from "@/components/ui/button";
 import { fmt, grouped, NO_VALUE } from "@/lib/fmt";
 import { useLiveSink, useLiveText } from "@/lib/live";
 import { type Frame, isFresh } from "@/lib/telemetry";
@@ -256,9 +256,7 @@ export function Schematic() {
           alignment the lattice depends on. Near-white outline, never accent: the
           accent means alarm, and a button is not one.
         */}
-        <Button size="sm" className="shrink-0" disabled>
-          INJECT FAULT
-        </Button>
+        <InjectDrawer />
       </div>
 
       <div className="relative min-h-0 min-w-0 flex-1">

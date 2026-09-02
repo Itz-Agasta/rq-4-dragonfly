@@ -23,6 +23,7 @@
 
 use anyhow::{Result, ensure};
 use clap::Args;
+use dronecan_ice::{FaultCommand, FaultKind};
 use engine_model::{CYLINDERS, EngineParams};
 
 /// Shape constant for the growth curve. Three time constants reaches 95%.
@@ -256,6 +257,17 @@ impl Faults {
     /// describing an already worn engine composes with an injected fault rather
     /// than being overwritten by it.
     pub fn apply(&self, params: &mut EngineParams, base: &EngineParams, t_s: f64) {
+        // Restored from `base` first, every call, so this is a pure function of
+        // the fault set rather than an accumulation of past ones. Two things
+        // depend on it and neither is hypothetical: a fault cleared over the bus
+        // has to give the engine back, and a fault moved to another cylinder has
+        // to leave the one it came from healthy. Writing only the faulted
+        // parameter left the last degraded value in place forever, which on a
+        // cleared engine looked exactly like a command that never arrived.
+        params.cylinder.injector_scale = base.cylinder.injector_scale;
+        params.cylinder.combustion_efficiency = base.cylinder.combustion_efficiency;
+        params.cooling.radiator_effectiveness = base.cooling.radiator_effectiveness;
+
         if let Some(f) = self.injector {
             params.cylinder.injector_scale[f.cylinder] =
                 base.cylinder.injector_scale[f.cylinder] * f.scale_at(t_s);
@@ -268,6 +280,75 @@ impl Faults {
             params.cooling.radiator_effectiveness =
                 base.cooling.radiator_effectiveness * f.scale_at(t_s);
         }
+    }
+
+    /// Apply a fault commanded over the bus, starting from now.
+    ///
+    /// The command carries no onset because a commanded fault begins when it
+    /// arrives: `t_s` is the simulated instant the frame was decoded, and every
+    /// ramp runs from there. That is the difference from the command line
+    /// arguments, which schedule a fault at a time chosen before the run starts.
+    ///
+    /// Returns false for a kind this build does not know, so an older simulator
+    /// talking to a newer ground station leaves the engine alone rather than
+    /// guessing.
+    ///
+    /// A commanded fault **replaces** the one of its kind rather than composing
+    /// with it. Two coking faults on one cylinder would otherwise ramp from two
+    /// different onsets and the settled value would depend on the order the
+    /// buttons were pressed.
+    #[must_use]
+    pub fn command(&mut self, command: FaultCommand, t_s: f64) -> bool {
+        let Some(kind) = FaultKind::from_u8(command.kind) else {
+            return false;
+        };
+        // One based on the wire, zero based here, and clamped rather than
+        // rejected: a cylinder index out of range is a ground station bug, and
+        // dropping the command silently would look like the bus lost it.
+        let cylinder = usize::from(command.cylinder.clamp(1, CYLINDERS as u8) - 1);
+        let severity = f64::from(command.severity);
+        let ramp_s = f64::from(command.ramp_s).max(0.0);
+
+        match kind {
+            FaultKind::Clear => *self = Self::default(),
+            FaultKind::InjectorCoking => {
+                self.injector = Some(InjectorCoking {
+                    cylinder,
+                    onset_s: t_s,
+                    ramp_s,
+                    final_scale: severity,
+                });
+            }
+            FaultKind::Misfire => {
+                self.misfire = Some(Misfire {
+                    cylinder,
+                    onset_s: t_s,
+                    ramp_s,
+                    final_rate: severity,
+                });
+            }
+            FaultKind::SensorDrift => {
+                self.drift = Some(SensorDrift {
+                    cylinder,
+                    onset_s: t_s,
+                    rate_k_per_h: severity,
+                });
+            }
+            FaultKind::SensorFreeze => {
+                self.freeze = Some(SensorFreeze {
+                    cylinder,
+                    onset_s: t_s,
+                });
+            }
+            FaultKind::CoolingDegradation => {
+                self.cooling = Some(CoolingDegradation {
+                    onset_s: t_s,
+                    ramp_s,
+                    final_scale: severity,
+                });
+            }
+        }
+        true
     }
 
     /// Corrupt the exhaust readings the way a failing instrument would.
@@ -290,6 +371,82 @@ impl Faults {
         {
             egt_k[f.cylinder] = *held.get_or_insert(egt_k[f.cylinder]);
         }
+    }
+}
+
+#[cfg(test)]
+mod command_tests {
+    use super::*;
+    use dronecan_ice::FaultKind;
+
+    fn command(kind: FaultKind, cylinder: u8, severity: f32, ramp_s: f32) -> FaultCommand {
+        FaultCommand {
+            sequence: 0,
+            kind: kind as u8,
+            cylinder,
+            severity,
+            ramp_s,
+        }
+    }
+
+    /// The one a live run found: clearing has to give the engine back.
+    ///
+    /// `apply` used to write only the faulted parameter, so a cleared fault left
+    /// the last degraded value in the plant for the rest of the mission and the
+    /// clear looked like a command that never arrived.
+    #[test]
+    fn clearing_restores_the_engine() {
+        let base = engine_model::engines::ae330();
+        let mut params = base.clone();
+        let mut faults = Faults::default();
+
+        assert!(faults.command(command(FaultKind::InjectorCoking, 3, 0.72, 0.0), 0.0));
+        faults.apply(&mut params, &base, 600.0);
+        let coked = params.cylinder.injector_scale[2];
+        assert!(
+            coked < base.cylinder.injector_scale[2] * 0.8,
+            "fault applied"
+        );
+
+        assert!(faults.command(command(FaultKind::Clear, 0, 0.0, 0.0), 600.0));
+        faults.apply(&mut params, &base, 900.0);
+        assert_eq!(
+            params.cylinder.injector_scale[2],
+            base.cylinder.injector_scale[2]
+        );
+    }
+
+    /// Moving a fault to another cylinder has to leave the first one healthy.
+    #[test]
+    fn a_moved_fault_leaves_its_old_cylinder_alone() {
+        let base = engine_model::engines::ae330();
+        let mut params = base.clone();
+        let mut faults = Faults::default();
+
+        assert!(faults.command(command(FaultKind::InjectorCoking, 3, 0.72, 0.0), 0.0));
+        faults.apply(&mut params, &base, 600.0);
+        assert!(faults.command(command(FaultKind::InjectorCoking, 1, 0.72, 0.0), 600.0));
+        faults.apply(&mut params, &base, 1200.0);
+
+        assert_eq!(
+            params.cylinder.injector_scale[2],
+            base.cylinder.injector_scale[2]
+        );
+        assert!(params.cylinder.injector_scale[0] < base.cylinder.injector_scale[0] * 0.8);
+    }
+
+    #[test]
+    fn an_unknown_kind_changes_nothing() {
+        let mut faults = Faults::default();
+        let unknown = FaultCommand {
+            sequence: 0,
+            kind: 200,
+            cylinder: 1,
+            severity: 1.0,
+            ramp_s: 0.0,
+        };
+        assert!(!faults.command(unknown, 0.0));
+        assert!(faults.injector.is_none() && faults.misfire.is_none());
     }
 }
 

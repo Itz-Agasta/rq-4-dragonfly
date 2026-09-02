@@ -19,7 +19,7 @@ mod power;
 mod reciprocating;
 
 pub use air_data::{IndicatedAirspeed, StaticPressure, StaticTemperature};
-pub use dragonfly::AuxiliaryStatus;
+pub use dragonfly::{AuxiliaryStatus, FaultCommand, FaultKind, NODE_GROUND_STATION};
 pub use fuel_tank::FuelTankStatus;
 pub use power::{CircuitStatus, error_flags};
 pub use reciprocating::{CylinderStatus, EngineState, ReciprocatingStatus, flags};
