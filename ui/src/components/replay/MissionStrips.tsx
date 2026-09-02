@@ -4,35 +4,21 @@
  * The screen has to argue divergence from a model rather than "a cylinder got
  * hot", which any thermocouple could say, so EGT and CHT carry the dashed
  * predicted trace. The four context channels are drawn dim: luminance is a data
- * channel and spending it evenly across six panels of stationary noise wastes it
- * on the four that carry no part of the story.
- *
- * The accented cylinder is ranked from the recorded residuals rather than named,
- * so a mission with a fault on another cylinder draws that one.
+ * channel and spending it evenly across six panels of stationary noise wastes
+ * it on the four carrying no part of the story.
  */
 
 import { useMemo, useRef } from "react";
 
+import { BOX, path, series, span } from "@/components/replay/trace";
 import { fmt, missionClock } from "@/lib/fmt";
 import { Live, useLiveSink } from "@/lib/live";
 import { type Frame, TWIN } from "@/lib/telemetry";
 import { channel } from "@/store/frame";
 import { session, useReplay } from "@/store/replay";
 
-/** Plot coordinate space, mapped to each strip with `preserveAspectRatio="none"`. */
-const BOX = 100;
-
-/** Headroom above and below every trace, as a fraction of the box. */
-const PAD = 10;
-
-/**
- * Most points drawn per trace.
- *
- * A strip is about 400 px wide at 1600, so 600 is already more than one point
- * per pixel. The overview pass carries 2,880 and drawing all of them would build
- * five 35 kB path strings for the EGT cell alone.
- */
-const MAX_POINTS = 600;
+/** Points per trace. A strip is about 400 px wide at 1600. */
+const MAX_POINTS = 480;
 
 interface StripSpec {
   /** Channel registry id of the trace that carries the story. */
@@ -212,55 +198,13 @@ function traces(
   frames: Frame[],
   spec: StripSpec,
 ): { main: string; ghosts: string[]; predicted?: string } {
-  if (frames.length === 0) return { main: "", ghosts: [] };
-
   const ids = [spec.id, ...spec.ghosts, ...(spec.predicted ? [spec.predicted] : [])];
-  const series = ids.map((id) => sample(frames, channel(id).get));
-
-  let lo = Number.POSITIVE_INFINITY;
-  let hi = Number.NEGATIVE_INFINITY;
-  for (const values of series) {
-    for (const value of values) {
-      if (!Number.isFinite(value)) continue;
-      if (value < lo) lo = value;
-      if (value > hi) hi = value;
-    }
-  }
-  if (!Number.isFinite(lo)) return { main: "", ghosts: [] };
-  const span = hi - lo || 1;
-
-  const paths = series.map((values) => path(values, lo, span));
+  const all = ids.map((id) => series(frames, channel(id).get, MAX_POINTS));
+  const scale = span(all);
+  const paths = all.map((one) => path(one.values, scale));
   return {
-    main: paths[0]!,
+    main: paths[0] ?? "",
     ghosts: paths.slice(1, 1 + spec.ghosts.length),
-    predicted: spec.predicted ? paths[paths.length - 1] : undefined,
+    predicted: spec.predicted ? paths.at(-1) : undefined,
   };
-}
-
-/** One value per drawn point, decimated by stride. */
-function sample(frames: Frame[], get: (f: Frame) => number): number[] {
-  const stride = Math.max(1, Math.ceil(frames.length / MAX_POINTS));
-  const out: number[] = [];
-  for (let i = 0; i < frames.length; i += stride) out.push(get(frames[i]!));
-  return out;
-}
-
-function path(values: number[], lo: number, span: number): string {
-  let d = "";
-  let open = false;
-  for (let i = 0; i < values.length; i += 1) {
-    const value = values[i]!;
-    // A gap rather than a line through it: a channel the recording does not
-    // carry must not be drawn as a straight run between the samples that
-    // bracket it.
-    if (!Number.isFinite(value)) {
-      open = false;
-      continue;
-    }
-    const x = (i / Math.max(1, values.length - 1)) * BOX;
-    const y = BOX - (PAD + ((value - lo) / span) * (BOX - 2 * PAD));
-    d += `${open ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)} `;
-    open = true;
-  }
-  return d.trim();
 }

@@ -28,10 +28,9 @@ const MAX_LABELS = 5;
 /**
  * Closest two labels may sit, as a percentage of the track.
  *
- * The staggered rows buy one overlap and no more, and this recording raises two
- * residuals eighty seconds apart three hours in, which lands both strings on top
- * of each other. The dropped ones are still ticks on the track and still rows in
- * the log.
+ * The staggered rows buy one overlap and no more, and residuals arrive in
+ * bursts a minute apart. A dropped label is still a tick on the track and still
+ * a row in the log.
  */
 const MIN_LABEL_GAP = 9;
 

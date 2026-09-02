@@ -1,21 +1,14 @@
 /**
  * A loaded recording, and the playhead over it.
  *
- * Split the way the rest of the app is split: the frames and everything derived
- * from them are cold, set once when a mission opens, and the playhead is hot. It
- * moves at 500x on the fastest transport setting, so routing it through React
- * would reconcile the tree once per animation frame to move one line. The frames
- * live in the store and the playhead lives in the session beside it; neither
- * holds a copy of the other's data.
+ * The frames and everything derived from them are cold, set once when a mission
+ * opens; the playhead is hot and moves at 500x, so it stays out of React. One
+ * array, referenced by both.
  *
- * # The events are re-derived, not recorded
- *
- * `store/events.ts` runs over the recorded frames and produces the same alerts
- * with the same ids the live screen produced, because every input it reads is in
- * the frame. Nothing was added to the wire for this screen and there is no
- * second implementation to keep in step. A recorded frame carries zero source
- * ages, which read as fresh, so the freshness gates inside those rules pass and
- * a recording is judged on what it contains rather than on how old the file is.
+ * The events come from `store/events.ts` run over the recorded frames, which
+ * yields the same alerts with the same ids the live screen produced. A recorded
+ * frame carries zero source ages, which read as fresh, so the freshness gates
+ * inside those rules pass rather than suppressing every event.
  */
 
 import { create } from "zustand";
@@ -40,11 +33,10 @@ const STEP_S = 60;
  * same for a coked injector and a fouled radiator. It is the only accent on the
  * timeline, so it carries a label saying what it is.
  *
- * `NaN` until the twin locks, and that is not a detail. Before the lock the
- * indices read zero, which is not a score of zero but the absence of one, and
- * plotting it puts a full-scale spike at T+0 that compresses the entire mission
- * against the top of the track: measured on the four hour coking recording, the
- * 99 to 33.7 decline that is the whole story rendered as a flat line.
+ * `NaN` until the twin locks. The indices read zero before the lock, which is
+ * the absence of a score rather than a score of zero, and plotting it puts a
+ * full-scale spike at T+0: a 99 to 33.7 decline over four hours then renders as
+ * a flat line.
  */
 function worstIndex(frame: Frame): number {
   const health = frame.twin?.health;
@@ -64,8 +56,6 @@ export interface MissionReport {
   redline_s: number | null;
   /** Which limit that was. */
   redline_channel: string;
-  /** Seconds the twin preceded the redline, null while either is absent. */
-  lead_s: number | null;
   /** Events raised over the mission. */
   events: number;
 }
@@ -90,11 +80,6 @@ class Playhead {
   /** The frame under the playhead, or null before a mission is loaded. */
   frame(): Frame | null {
     return useReplay.getState().frames[this.index] ?? null;
-  }
-
-  /** Index of that frame, which the traces share. */
-  at(): number {
-    return this.index;
   }
 
   reset(duration: number): void {
@@ -195,7 +180,6 @@ const NO_REPORT: MissionReport = {
   detected_s: null,
   redline_s: null,
   redline_channel: "",
-  lead_s: null,
   events: 0,
 };
 
@@ -286,7 +270,6 @@ function summarise(frames: Frame[], events: Alert[]): MissionReport {
     detected_s: detected,
     redline_s: redline,
     redline_channel: channel,
-    lead_s: detected !== null && redline !== null ? redline - detected : null,
     events: events.length,
   };
 }

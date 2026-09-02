@@ -9,7 +9,7 @@
 
 import { useEffect, useRef } from "react";
 
-import { fmt, missionClock } from "@/lib/fmt";
+import { fmt, missionClock, NO_VALUE } from "@/lib/fmt";
 import { subscribe } from "@/lib/live";
 import { bytesLabel } from "@/lib/mission";
 import { session, useReplay } from "@/store/replay";
@@ -102,7 +102,7 @@ export function EventLog() {
           <div className="label-micro">detection vs certified threshold</div>
           <div className="mt-[5px] flex items-baseline gap-[10px]">
             <span className="t-value num">
-              {report.detected_s === null ? "—" : missionClock(report.detected_s).slice(2)}
+              {report.detected_s === null ? NO_VALUE : missionClock(report.detected_s).slice(2)}
             </span>
             <span className="text-muted-foreground text-[11px]">twin</span>
             <span className="text-foreground-dim ml-auto text-[10px] whitespace-nowrap">
@@ -152,11 +152,11 @@ function Tile({ label, value, last = false }: { label: string; value: string; la
 }
 
 /**
- * The log as a file, built in the browser from what is already on screen.
+ * The log as a file, built from what is already on screen.
  *
- * Deliberately not a server-side report: everything in it was derived here from
- * the recorded frames, and asking the daemon to re-derive it would be a second
- * implementation of the event rules.
+ * Not a server-side report: every line of it was derived here from the recorded
+ * frames, and asking the daemon for it would be a second implementation of the
+ * event rules.
  */
 function exportReport(
   events: { t_s: number; severity: string; subsystem: string; message: string }[],

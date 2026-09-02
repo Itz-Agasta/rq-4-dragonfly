@@ -9,23 +9,14 @@
 
 import { useMemo, useRef } from "react";
 
+import { BOX, path, type Series, series } from "@/components/replay/trace";
 import { fmt, kelvinToCelsius, metresToFeet } from "@/lib/fmt";
 import { Live, useLiveSink } from "@/lib/live";
 import type { Frame } from "@/lib/telemetry";
 import { session, useReplay } from "@/store/replay";
 
-const BOX = 100;
-const PAD = 12;
-const MAX_POINTS = 400;
-
-/**
- * Range below which a channel is called constant rather than plotted.
- *
- * A generated cruise holds altitude to a tenth of a foot, and scaling a trace to
- * its own extremes turns that into a full-height wander that reads as a climb.
- * A flat line down the middle and the value in the corner is the honest picture.
- */
-const FLAT_SPAN = 0.05;
+/** Points per profile. The panel is 260 px wide. */
+const MAX_POINTS = 260;
 
 /** Sea level standard temperature, K. ISA, published. */
 const ISA_SEA_LEVEL_K = 288.15;
@@ -56,8 +47,11 @@ function isaDeviation(frame: Frame): number {
 
 export function Profile() {
   const frames = useReplay((s) => s.frames);
-  const altitude = useMemo(() => trace(frames, (f) => metresToFeet(f.altitude_m) / 1000), [frames]);
-  const air = useMemo(() => trace(frames, (f) => kelvinToCelsius(f.oat_k)), [frames]);
+  const altitude = useMemo(
+    () => series(frames, (f) => metresToFeet(f.altitude_m) / 1000, MAX_POINTS),
+    [frames],
+  );
+  const air = useMemo(() => series(frames, (f) => kelvinToCelsius(f.oat_k), MAX_POINTS), [frames]);
 
   return (
     <div className="border-border flex w-[260px] shrink-0 flex-col overflow-hidden border-r">
@@ -65,8 +59,8 @@ export function Profile() {
         <span className="t-section">MISSION PROFILE</span>
       </div>
 
-      <Plot title="pressure alt · kft" series={altitude} dp={1} />
-      <Plot title="oat · °C" series={air} dp={0} />
+      <Plot title="pressure alt · kft" trace={altitude} dp={1} />
+      <Plot title="oat · °C" trace={air} dp={0} />
 
       <div className="shrink-0 px-4 pt-[10px] pb-[14px]">
         <div className="label-micro mb-[6px]">environment at playhead</div>
@@ -105,15 +99,7 @@ function Row({
   );
 }
 
-interface Trace {
-  d: string;
-  lo: number;
-  hi: number;
-  /** The channel never moved, so it is labelled rather than scaled. */
-  flat: boolean;
-}
-
-function Plot({ title, series, dp }: { title: string; series: Trace; dp: number }) {
+function Plot({ title, trace, dp }: { title: string; trace: Series; dp: number }) {
   const marker = useRef<SVGLineElement>(null);
 
   useLiveSink(() => {
@@ -127,9 +113,9 @@ function Plot({ title, series, dp }: { title: string; series: Trace; dp: number 
       <div className="flex items-baseline justify-between gap-[10px]">
         <span className="label-micro">{title}</span>
         <span className="num text-foreground-dim text-[10px]">
-          {series.flat
-            ? `${fmt(series.lo, dp)} constant`
-            : `${fmt(series.lo, dp)} – ${fmt(series.hi, dp)}`}
+          {trace.flat
+            ? `${fmt(trace.lo, dp)} constant`
+            : `${fmt(trace.lo, dp)} – ${fmt(trace.hi, dp)}`}
         </span>
       </div>
       <svg
@@ -152,7 +138,7 @@ function Plot({ title, series, dp }: { title: string; series: Trace; dp: number 
           />
         ))}
         <path
-          d={series.d}
+          d={path(trace.values, trace)}
           fill="none"
           stroke="var(--measured)"
           strokeWidth="2"
@@ -171,37 +157,4 @@ function Plot({ title, series, dp }: { title: string; series: Trace; dp: number 
       </svg>
     </div>
   );
-}
-
-/** One channel over the whole mission, scaled to its own extremes. */
-function trace(frames: Frame[], get: (frame: Frame) => number): Trace {
-  const stride = Math.max(1, Math.ceil(frames.length / MAX_POINTS));
-  const values: number[] = [];
-  for (let i = 0; i < frames.length; i += stride) values.push(get(frames[i]!));
-
-  let lo = Number.POSITIVE_INFINITY;
-  let hi = Number.NEGATIVE_INFINITY;
-  for (const value of values) {
-    if (!Number.isFinite(value)) continue;
-    if (value < lo) lo = value;
-    if (value > hi) hi = value;
-  }
-  if (!Number.isFinite(lo)) return { d: "", lo: Number.NaN, hi: Number.NaN, flat: true };
-  const flat = hi - lo < FLAT_SPAN;
-  const span = flat ? 1 : hi - lo;
-
-  let d = "";
-  let open = false;
-  for (let i = 0; i < values.length; i += 1) {
-    const value = values[i]!;
-    if (!Number.isFinite(value)) {
-      open = false;
-      continue;
-    }
-    const x = (i / Math.max(1, values.length - 1)) * BOX;
-    const y = flat ? BOX / 2 : BOX - (PAD + ((value - lo) / span) * (BOX - 2 * PAD));
-    d += `${open ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)} `;
-    open = true;
-  }
-  return { d: d.trim(), lo, hi, flat };
 }

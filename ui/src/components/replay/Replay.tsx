@@ -1,17 +1,14 @@
 /**
  * REPLAY: a recorded mission, scrubbed.
  *
- * The screen is a data source swap and nothing more. `replay::read` returns the
- * same `Frame` the WebSocket carries, so the channel registry, the event rules
- * and every readout work on a recording without knowing it is one, and the
- * render loop is pointed at the frame under the playhead for as long as this
- * screen is mounted.
+ * A data source swap and nothing more. `replay::read` returns the `Frame` the
+ * WebSocket carries, so the channel registry, the event rules and every readout
+ * work on a recording without knowing it is one.
  *
- * Two things a recorded frame does not carry, both deliberate and both load
- * bearing here. There is **no prognosis**: a remaining life is a fit over a span
- * the recording does not store, so nothing on this screen draws one. And there
- * is **no isolation detail**, which is why a replayed frame is never routed to
- * ANALYSIS.
+ * Two absences in a recorded frame are load bearing here. There is **no
+ * prognosis**, a fit over a span the recording does not store, so nothing here
+ * draws a remaining life; and **no isolation detail**, which is why a replayed
+ * frame is never routed to ANALYSIS.
  */
 
 import { useEffect } from "react";
@@ -29,8 +26,6 @@ export function Replay() {
   const status = useReplay((s) => s.status);
   const error = useReplay((s) => s.error);
   const open = useReplay((s) => s.open);
-  const playing = useReplay((s) => s.playing);
-  const setPlaying = useReplay((s) => s.setPlaying);
 
   // Every readout in the app, the mission bar included, follows the playhead
   // while this screen is mounted. Restored on the way out or the whole app
@@ -69,11 +64,15 @@ export function Replay() {
     };
   }, [open]);
 
+  // Bound once. Reading `playing` through the store rather than closing over it
+  // is what keeps this from tearing the listener down and rebuilding it on every
+  // transport press.
   useEffect(() => {
     const keys = (event: KeyboardEvent) => {
       if (event.target instanceof HTMLInputElement) return;
       if (event.code === "Space") {
         event.preventDefault();
+        const { playing, setPlaying } = useReplay.getState();
         setPlaying(!playing);
       } else if (event.code === "ArrowLeft") {
         session.step(-1);
@@ -83,7 +82,7 @@ export function Replay() {
     };
     window.addEventListener("keydown", keys);
     return () => window.removeEventListener("keydown", keys);
-  }, [playing, setPlaying]);
+  }, []);
 
   if (status !== "ready") {
     return (

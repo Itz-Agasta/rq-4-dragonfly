@@ -36,12 +36,11 @@ export interface MissionWindow {
 /**
  * Frames the overview pass keeps, one in this many.
  *
- * A hundred, which is 0.2 Hz and 2,880 frames on a four hour mission. Measured
- * against the daemon: the same request at 1 Hz is 34.7 MB and at 0.2 Hz it is
- * 6.9 MB in 0.26 s, and 2,880 points is already three per pixel on a timeline a
- * thousand pixels wide. The event rules in `store/events.ts` are written against
- * mission time rather than frame counts, so their two second sustain and ten
- * second clear windows still mean two and ten seconds here.
+ * 0.2 Hz, 2,880 frames on a four hour mission: measured at 6.9 MB in 0.26 s
+ * against 34.7 MB at 1 Hz, and already three points per pixel on a timeline a
+ * thousand pixels wide. The rules in `store/events.ts` are written against
+ * mission time rather than frame counts, so their sustain and clear windows
+ * still mean seconds at this sampling.
  */
 export const OVERVIEW_STRIDE = 100;
 
@@ -71,10 +70,9 @@ export async function readMission(id: string, window: MissionWindow): Promise<Fr
 /**
  * Bytes as an operator reads them.
  *
- * Computed from what the directory listing reports rather than carried as a
- * figure: a recorder that fits four hours in 96 MB is an argument for putting
- * one on the aircraft, and a wrong number here is the kind a judge divides in
- * their head.
+ * Computed from the directory listing rather than authored: a recorder that
+ * fits four hours in 96 MB is an argument for carrying one, and a figure typed
+ * in is the kind a reader divides in their head.
  */
 export function bytesLabel(bytes: number): string {
   if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
