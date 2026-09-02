@@ -190,6 +190,19 @@ async fn pump(
     let mut logged = Instant::now();
     let mut transfer_ids = dronecan_ice::TransferIdMap::new();
 
+    // Anything queued before this socket existed was aimed at a bus that has
+    // since gone away, and the press that queued it is seconds or minutes old.
+    // Sending it now would inject a fault nobody is expecting at a moment nobody
+    // chose. The handler refuses while the link is down, so this only catches the
+    // press that raced the drop.
+    while let Ok(stale) = commands.try_recv() {
+        tracing::warn!(
+            sequence = stale.sequence,
+            kind = stale.kind,
+            "fault command dropped, the bus went away before it was sent"
+        );
+    }
+
     loop {
         // A timeout rather than a plain read, so a silent bus still produces
         // frames. Without this the last frame a client saw stays on screen

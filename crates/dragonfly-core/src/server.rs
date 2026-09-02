@@ -76,9 +76,11 @@ pub struct AppState {
     /// that held the socket would have to be told about every reconnection; this
     /// way the command is queued and whichever socket is current sends it.
     ///
-    /// Bounded and small: commands are pressed by a person, so a queue that has
-    /// filled means the bus is down, and refusing is better than buffering a
-    /// fault that lands minutes later.
+    /// Bounded and small: commands are pressed by a person, so nothing legitimate
+    /// fills it. **Space in the queue is not a route to the bus**, because the
+    /// ingest loop only drains it while its socket is open; the handler consults
+    /// `link` for that, and the loop throws away anything it finds queued when a
+    /// socket is reopened.
     pub commands: mpsc::Sender<FaultCommand>,
 }
 
@@ -223,6 +225,17 @@ async fn fault(
     State(state): State<AppState>,
     Json(request): Json<FaultRequest>,
 ) -> impl IntoResponse {
+    // The queue is drained by the ingest loop only while its socket is open, so
+    // with the bus down there is room for eight commands that would all land at
+    // once whenever it comes back: `try_send` succeeding says the queue has
+    // space, never that anything is listening. `link_ok` is the same flag the
+    // screen greys itself out on, and it covers both halves of having no route,
+    // an interface that will not open and an engine that has fallen silent.
+    // Checked before a sequence number is spent, so a refused press does not
+    // leave a gap in the numbering the simulator de-duplicates on.
+    if !state.link.link_ok.load(Ordering::Relaxed) {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no route to the bus").into_response();
+    }
     static SEQUENCE: AtomicU64 = AtomicU64::new(0);
     let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed) as u8;
     let command = FaultCommand {
@@ -234,8 +247,8 @@ async fn fault(
     };
     match state.commands.try_send(command) {
         Ok(()) => (StatusCode::ACCEPTED, Json(sequence)).into_response(),
-        // Full means the bus is down and the queue has backed up. Saying so beats
-        // accepting a fault that lands whenever the link returns.
+        // Full with the link up means commands are arriving faster than the bus
+        // takes them, which a person pressing a control cannot do.
         Err(error) => {
             tracing::warn!(%error, "fault command not queued");
             (StatusCode::SERVICE_UNAVAILABLE, "no route to the bus").into_response()

@@ -98,7 +98,7 @@ export function AlertStack() {
   const unacked = alerts.filter((a) => !acked.has(a.id)).length;
 
   return (
-    <section className="border-border flex min-h-0 shrink flex-col overflow-hidden border-b">
+    <section className="border-border flex min-h-0 flex-1 flex-col overflow-hidden border-b">
       <div className="border-border flex h-9 shrink-0 items-center justify-between border-b px-4">
         <span className="t-section">ALERTS</span>
         <span className="label-micro">

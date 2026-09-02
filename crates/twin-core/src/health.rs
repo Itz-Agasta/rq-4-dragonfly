@@ -267,28 +267,61 @@ impl Health {
         ((d.nominal - self.values[i]) / span).max(0.0)
     }
 
+    /// One parameter, held inside the range the physics is defined over.
+    ///
+    /// The filter clamps its **mean** to these bounds after every update, and that
+    /// is not enough on its own: a sigma point is the mean plus a column of the
+    /// covariance root, so an inflated covariance puts points far outside them and
+    /// **every sigma point is propagated through the engine model**. A step fault
+    /// commanded from the ground station drove `eta_vol` to -15228 on one such
+    /// point, which makes `eta_vol_max` negative, and `engine_model` clamps
+    /// volumetric efficiency into `0.0 ..= eta_vol_max` and panics on an inverted
+    /// range. That took the core's whole ingest task down with it.
+    ///
+    /// This is the sigma point projection of a constrained UKF rather than a patch
+    /// on a panic: the estimate is constrained where it becomes physics, the
+    /// covariance is left alone so the filter's own uncertainty stays honest, and
+    /// `engine_model` keeps its precondition instead of being taught to accept an
+    /// engine that cannot exist.
+    ///
+    /// Simon, "Kalman filtering with state constraints: a survey of linear and
+    /// nonlinear algorithms", IET Control Theory Appl. 4(8), 2010, sec. 4.
+    /// <https://doi.org/10.1049/iet-cta.2009.0032>
+    fn bounded(&self, i: usize) -> f64 {
+        let d = &DESCRIPTORS[i];
+        // A non-finite point cannot be clamped into the range, and it would reach
+        // the same clamp as a NaN bound and panic there instead. The filter's own
+        // factorisation rejects a diverged covariance on the next step, so this
+        // only has to keep the physics evaluable until it does.
+        if !self.values[i].is_finite() {
+            return d.nominal;
+        }
+        self.values[i].clamp(d.lower, d.upper)
+    }
+
     /// Apply the estimate to a set of engine parameters.
     ///
     /// The base parameters are the engine as it was fitted when new; the result is
     /// the engine as the filter currently believes it to be. Every sigma point is
     /// propagated through its own copy of this, which is why it takes a reference
-    /// and returns an owned value rather than mutating in place.
+    /// and returns an owned value rather than mutating in place, and why every
+    /// parameter goes through [`Health::bounded`] on the way.
     #[must_use]
     pub fn apply(&self, base: &EngineParams) -> EngineParams {
         let mut p = base.clone();
-        p.cylinder.eta_vol_max *= self.values[index::ETA_VOL];
-        p.compressor.eta_max *= self.values[index::ETA_COMPRESSOR];
-        p.turbine.eta_max *= self.values[index::ETA_TURBINE];
+        p.cylinder.eta_vol_max *= self.bounded(index::ETA_VOL);
+        p.compressor.eta_max *= self.bounded(index::ETA_COMPRESSOR);
+        p.turbine.eta_max *= self.bounded(index::ETA_TURBINE);
         for i in 0..CYLINDERS {
-            p.cylinder.injector_scale[i] *= self.values[index::INJECTOR + i] / INJECTOR_CD_NOMINAL;
+            p.cylinder.injector_scale[i] *= self.bounded(index::INJECTOR + i) / INJECTOR_CD_NOMINAL;
         }
-        p.cooling.radiator_effectiveness *= self.values[index::RADIATOR];
-        p.thermal.head_conductance_w_per_k *= self.values[index::HEAD_CONDUCTANCE];
+        p.cooling.radiator_effectiveness *= self.bounded(index::RADIATOR);
+        p.thermal.head_conductance_w_per_k *= self.bounded(index::HEAD_CONDUCTANCE);
         // Pump wear, bearing clearance and a viscosity shift all land on the same
         // coefficient and none of them is separable from one gallery pressure, so
         // the lubrication circuit carries one lumped parameter rather than three
         // that could not be told apart. See `engine_model::oil`.
-        p.oil.pressure_coefficient *= self.values[index::OIL_SUPPLY];
+        p.oil.pressure_coefficient *= self.bounded(index::OIL_SUPPLY);
         p
     }
 }
@@ -310,6 +343,32 @@ mod tests {
             );
         }
         assert!((applied.oil.pressure_coefficient - base.oil.pressure_coefficient).abs() < 1e-15);
+    }
+
+    /// The one a live run found, and the reason it is not a unit-test-shaped bug:
+    /// the filter clamps its mean, so nothing here is ever out of bounds until a
+    /// covariance inflated by a step fault throws a sigma point past them. Every
+    /// sigma point is propagated through `apply`, and an inverted or non-finite
+    /// range panics inside `engine_model` and takes the ingest task with it.
+    #[test]
+    fn a_sigma_point_outside_the_bounds_still_makes_an_engine() {
+        let base = engine_model::engines::ae330();
+        for absurd in [-15_228.431_367_932_943, 1.0e9, f64::NAN, f64::INFINITY] {
+            let health = Health {
+                values: [absurd; PARAMS],
+            };
+            let p = health.apply(&base);
+            assert!(p.cylinder.eta_vol_max > 0.0, "eta_vol_max from {absurd}");
+            assert!(p.compressor.eta_max > 0.0, "eta_c from {absurd}");
+            assert!(p.turbine.eta_max > 0.0, "eta_t from {absurd}");
+            assert!(p.cooling.radiator_effectiveness > 0.0, "radiator");
+            assert!(p.thermal.head_conductance_w_per_k > 0.0, "head");
+            assert!(p.oil.pressure_coefficient > 0.0, "oil");
+            assert!(
+                p.cylinder.injector_scale.iter().all(|s| *s > 0.0),
+                "injectors from {absurd}"
+            );
+        }
     }
 
     /// The simulator settles a coked injector at 0.84 of nominal flow. Expressed as

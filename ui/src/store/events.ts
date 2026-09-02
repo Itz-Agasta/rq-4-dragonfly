@@ -46,7 +46,7 @@ import { BAND_SIGMA } from "@/store/twin";
 const SUSTAIN_S = 2;
 
 /**
- * Where a residual has to fall back to before its episode is considered over.
+ * Where a residual has to fall back to before its episode can be considered over.
  *
  * Below the raise threshold on purpose. A residual sitting exactly on three
  * sigma would otherwise open and close an episode continuously, and each cycle
@@ -54,12 +54,31 @@ const SUSTAIN_S = 2;
  */
 const CLEAR_SIGMA = 2.5;
 
+/**
+ * Seconds a residual must stay back inside `CLEAR_SIGMA` before its episode ends.
+ *
+ * A dead band on its own is not enough and the demonstration fault proves it: as
+ * the coking ramp deepens, EGT 3 crosses three sigma, dips back under 2.5 for a
+ * few frames on noise, and crosses again, and the stack fills with `EGT 3
+ * residual -3.10σ` and `EGT 3 residual -7.67σ` for one excursion that never
+ * ended. Measured at eight alerts from four channels on one ramp, which pushed
+ * the advisory panel off the screen.
+ *
+ * Ten seconds because the residual noise here is white at the publish rate, so a
+ * dip is sub-second and two orders below this, while a channel that has genuinely
+ * come back stays back. It is the same argument as `SUSTAIN_S` on the way in,
+ * which is why the entry and exit are symmetric in shape if not in duration.
+ */
+const CLEAR_S = 10;
+
 /** One channel's excursion state between frames. */
 interface Episode {
   /** Mission time the residual first left the band, or null when inside it. */
   since: number | null;
   /** Whether an event has already been raised for this episode. */
   raised: boolean;
+  /** Mission time it fell back inside `CLEAR_SIGMA`, or null while outside it. */
+  returned: number | null;
 }
 
 export class EventLog {
@@ -163,15 +182,27 @@ export class EventLog {
     );
   }
 
-  /** The twin losing its estimate, which is not an engine fault but is a caveat. */
+  /**
+   * The twin losing its estimate, which is not an engine fault but is a caveat.
+   *
+   * An edge, like the link rule above it, and it has to be: an event id is its
+   * source and its rounded mission time, so a latch that never cleared would
+   * raise a fresh "lost lock" every second for as long as the outage lasted and
+   * bury the alert that explains it.
+   *
+   * A stale frame updates nothing. Its twin is absent rather than unlocked, so
+   * reading it as unlocked would clear the latch during the outage and then say
+   * nothing when the feed comes back with an estimate that has genuinely gone.
+   */
   private lock(frame: Frame): void {
+    if (!isFresh(frame.ages.engine_ms)) return;
     const locked = frame.twin?.locked === true;
-    if (this.wasLocked && !locked && isFresh(frame.ages.engine_ms)) {
+    if (this.wasLocked && !locked) {
       this.raise(
         event(frame.t_s, "advisory", "TWIN", "Twin lost lock, residuals unreliable", "twin"),
       );
     }
-    this.wasLocked = locked || this.wasLocked;
+    this.wasLocked = locked;
   }
 
   /** Channels sitting outside their own tolerance band for long enough to mean it. */
@@ -183,7 +214,13 @@ export class EventLog {
       const sigma = twin.normalised[i];
       if (sigma === undefined || !Number.isFinite(sigma)) continue;
       const magnitude = Math.abs(sigma);
-      const episode = this.episodes.get(i) ?? { since: null, raised: false };
+      const episode = this.episodes.get(i) ?? { since: null, raised: false, returned: null };
+
+      // Anywhere at or above the clear threshold restarts the dwell, including the
+      // dead band between the two. A residual that fell back, then settled at 2.7
+      // sigma, has not come back at all, and counting the dwell through that would
+      // close the episode on a channel still sitting outside tolerance.
+      if (magnitude >= CLEAR_SIGMA) episode.returned = null;
 
       if (magnitude > BAND_SIGMA) {
         if (episode.since === null) episode.since = frame.t_s;
@@ -201,8 +238,12 @@ export class EventLog {
           );
         }
       } else if (magnitude < CLEAR_SIGMA) {
-        episode.since = null;
-        episode.raised = false;
+        if (episode.returned === null) episode.returned = frame.t_s;
+        if (frame.t_s - episode.returned >= CLEAR_S) {
+          episode.since = null;
+          episode.raised = false;
+          episode.returned = null;
+        }
       }
       this.episodes.set(i, episode);
     }
