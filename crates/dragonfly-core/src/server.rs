@@ -292,25 +292,6 @@ async fn fault(
     }
 }
 
-/// How a client asks for part of a recording.
-///
-/// A two hour mission is 144,000 frames, which is far more than a timeline
-/// 1,600 pixels wide can show. `stride` is what an overview asks for and
-/// `from`/`count` is what a scrubbed window asks for, so one endpoint answers
-/// both instead of the client fetching everything and throwing most of it away.
-#[derive(Debug, serde::Deserialize)]
-pub struct Window {
-    /// Keep one frame in `stride`. One by default, which is every frame.
-    #[serde(default)]
-    pub stride: Option<usize>,
-    /// First frame to return, counted before striding.
-    #[serde(default)]
-    pub from: Option<usize>,
-    /// How many frames to return after striding.
-    #[serde(default)]
-    pub count: Option<usize>,
-}
-
 async fn missions(State(state): State<AppState>) -> impl IntoResponse {
     match replay::list(&state.record_dir) {
         Ok(missions) => Json(missions).into_response(),
@@ -330,7 +311,7 @@ async fn missions(State(state): State<AppState>) -> impl IntoResponse {
 async fn mission(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Query(window): Query<Window>,
+    Query(window): Query<replay::Window>,
 ) -> impl IntoResponse {
     // Rejected here rather than sanitised, because a path that escapes the
     // recording directory is a caller doing something no screen does.
@@ -345,7 +326,7 @@ async fn mission(
     // Reading a recording is hundreds of milliseconds of synchronous file and
     // decompression work, which would stall every other request on this runtime
     // for the duration.
-    let frames = tokio::task::spawn_blocking(move || replay::read(&path)).await;
+    let frames = tokio::task::spawn_blocking(move || replay::read(&path, &window)).await;
     let frames = match frames {
         Ok(Ok(frames)) => frames,
         Ok(Err(error)) => {
@@ -358,14 +339,7 @@ async fn mission(
         }
     };
 
-    let stride = window.stride.unwrap_or(1).max(1);
-    let selected: Vec<&Frame> = frames
-        .iter()
-        .skip(window.from.unwrap_or(0))
-        .step_by(stride)
-        .take(window.count.unwrap_or(usize::MAX))
-        .collect();
-    let Ok(payload) = rmp_serde::to_vec_named(&selected) else {
+    let Ok(payload) = rmp_serde::to_vec_named(&frames) else {
         return (StatusCode::INTERNAL_SERVER_ERROR, "cannot encode mission").into_response();
     };
     (

@@ -20,7 +20,9 @@ use std::fs::File;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use arrow::array::{Array, BooleanArray, Float32Array, Float64Array, StringArray, UInt64Array};
+use arrow::array::{
+    Array, BooleanArray, Float32Array, Float64Array, StringArray, UInt32Array, UInt64Array,
+};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
@@ -114,24 +116,77 @@ fn duration_from_statistics(metadata: &parquet::file::metadata::ParquetMetaData)
         .fold(f64::NAN, f64::max)
 }
 
-/// Read a whole recording back into frames.
+/// Frames one request may return.
 ///
-/// Loaded entire rather than streamed: a mission is scrubbed, and scrubbing
-/// wants random access at any speed in either direction, which a stream cannot
-/// give. Two hours at 20 Hz is 144,000 frames, which is large but bounded and
-/// sits in memory once rather than being re-read on every drag of a playhead.
-pub fn read(path: &Path) -> Result<Vec<Frame>> {
+/// Measured on a four hour recording, 288,000 frames and 96 MB on disk: without
+/// a cap one request serialises a 690 MB body and materialises every frame to do
+/// it, so an unbounded read is a way to exhaust the daemon by asking it politely.
+/// Twenty thousand is far more than a timeline 2,560 pixels wide can draw, and
+/// caps a request at a measured 48 MB in 0.5 s.
+pub const MAX_FRAMES: usize = 20_000;
+
+/// Which part of a recording to read.
+///
+/// One type for the query string and for the reader, so the endpoint cannot
+/// describe a window the reader interprets differently.
+#[derive(Clone, Copy, Debug, Default, serde::Deserialize)]
+pub struct Window {
+    /// Keep one frame in `stride`. One by default, which is every frame.
+    #[serde(default)]
+    pub stride: Option<usize>,
+    /// First frame to return, counted before striding.
+    #[serde(default)]
+    pub from: Option<usize>,
+    /// How many frames to return after striding, capped at [`MAX_FRAMES`].
+    #[serde(default)]
+    pub count: Option<usize>,
+}
+
+impl Window {
+    /// The window as three concrete numbers: first row, step, and how many.
+    #[must_use]
+    pub fn resolve(&self) -> (usize, usize, usize) {
+        (
+            self.from.unwrap_or(0),
+            self.stride.unwrap_or(1).max(1),
+            self.count.unwrap_or(MAX_FRAMES).clamp(1, MAX_FRAMES),
+        )
+    }
+}
+
+/// Read part of a recording back into frames.
+///
+/// **The window is pushed into the reader rather than applied to its result.**
+/// The client holds a whole mission because scrubbing wants random access in
+/// either direction; the daemon must not, because it would rebuild every frame
+/// of the file on every request and the largest window any screen asks for is a
+/// few thousand. `with_offset` and `with_limit` let parquet skip the row groups
+/// outside the span, so a window late in a mission does not decompress the hours
+/// before it.
+pub fn read(path: &Path, window: &Window) -> Result<Vec<Frame>> {
+    let (from, stride, count) = window.resolve();
     let file = File::open(path).with_context(|| format!("{}", path.display()))?;
+    // The last frame of a strided window is `(count - 1) * stride` rows past the
+    // first, so this is the exact span that yields `count` of them.
+    let span = stride
+        .saturating_mul(count.saturating_sub(1))
+        .saturating_add(1);
     let reader = ParquetRecordBatchReaderBuilder::try_new(file)
         .with_context(|| format!("{} is not readable parquet", path.display()))?
+        .with_offset(from)
+        .with_limit(span)
         .build()?;
 
     let mut frames = Vec::new();
+    let mut row_index = 0usize;
     for batch in reader {
         let batch = batch.context("reading a record batch")?;
         let columns = Columns::new(&batch)?;
         for row in 0..batch.num_rows() {
-            frames.push(columns.frame(row));
+            if row_index.is_multiple_of(stride) {
+                frames.push(columns.frame(row));
+            }
+            row_index += 1;
         }
     }
     Ok(frames)
@@ -183,6 +238,14 @@ impl<'a> Columns<'a> {
             .column_by_name(name)
             .and_then(|c| c.as_any().downcast_ref::<BooleanArray>())
             .is_some_and(|v| !v.is_null(row) && v.value(row))
+    }
+
+    fn u32(&self, name: &str, row: usize) -> u32 {
+        self.batch
+            .column_by_name(name)
+            .and_then(|c| c.as_any().downcast_ref::<UInt32Array>())
+            .filter(|v| !v.is_null(row))
+            .map_or(0, |v| v.value(row))
     }
 
     fn text(&self, name: &str, row: usize) -> String {
@@ -268,7 +331,7 @@ impl<'a> Columns<'a> {
             // Leaked as a static rather than carried: the frame wants a
             // `&'static str` and the recording holds one of four known words.
             engine_state: state_name(&self.text("engine_state", row)),
-            flags: 0,
+            flags: self.u32("flags", row),
             twin: self.twin(row),
             prognosis: None,
         }
@@ -331,11 +394,7 @@ impl<'a> Columns<'a> {
             diagnosis: Diagnosis {
                 posterior: std::array::from_fn(|h| self.f(&format!("posterior_{h}"), row)),
                 match_score: [f64::NAN; HYPOTHESES],
-                best: self
-                    .batch
-                    .column_by_name("diagnosis_best")
-                    .and_then(|c| c.as_any().downcast_ref::<arrow::array::UInt32Array>())
-                    .map_or(0, |v| v.value(row) as usize),
+                best: self.u32("diagnosis_best", row) as usize,
                 rejection: [""; HYPOTHESES],
             },
         })
@@ -422,8 +481,12 @@ mod tests {
     /// accepts it and every value lands one column over.
     #[test]
     fn a_frame_survives_being_written_and_read_back() {
-        let path = std::env::temp_dir().join(format!("dragonfly-roundtrip-{}.parquet", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "dragonfly-roundtrip-{}.parquet",
+            std::process::id()
+        ));
         let mut frame = crate::record::tests::bare_frame();
+        frame.flags = 0b1010_0001;
         let mut recorder = crate::record::Recorder::create(&path, 132_000.0).expect("a recorder");
         for seq in 1..=3u64 {
             frame.seq = seq;
@@ -433,18 +496,73 @@ mod tests {
         }
         recorder.finish().expect("a footer");
 
-        let frames = read(&path).expect("readable");
+        let frames = read(&path, &Window::default()).expect("readable");
         std::fs::remove_file(&path).ok();
 
         assert_eq!(frames.len(), 3);
         assert_eq!(frames[2].seq, 3);
         assert!((frames[2].t_s - 0.15).abs() < 1e-9);
-        assert!((frames[2].egt_k[2] - 703.0).abs() < 0.01, "{}", frames[2].egt_k[2]);
-        assert!((frames[0].oil_p_pa - 420_000.0).abs() < 1.0, "{}", frames[0].oil_p_pa);
-        assert!((frames[0].coolant_t_k - 361.0).abs() < 0.01, "{}", frames[0].coolant_t_k);
+        assert!(
+            (frames[2].egt_k[2] - 703.0).abs() < 0.01,
+            "{}",
+            frames[2].egt_k[2]
+        );
+        assert!(
+            (frames[0].oil_p_pa - 420_000.0).abs() < 1.0,
+            "{}",
+            frames[0].oil_p_pa
+        );
+        assert!(
+            (frames[0].coolant_t_k - 361.0).abs() < 0.01,
+            "{}",
+            frames[0].coolant_t_k
+        );
         assert!((frames[0].injection_ms[2] - 1.5).abs() < 0.01);
         assert_eq!(frames[0].engine_state, "RUNNING");
-        assert!(frames[0].twin.is_none(), "a frame recorded with no estimate must read back with none");
+        assert_eq!(frames[0].flags, 0b1010_0001, "the recorded status bitmask");
+        assert!(
+            frames[0].twin.is_none(),
+            "a frame recorded with no estimate must read back with none"
+        );
+    }
+
+    /// The window is what stops one request rebuilding a whole mission, so it
+    /// has to be the reader that applies it. Slicing the result instead would
+    /// pass this test and still materialise every frame in the file.
+    #[test]
+    fn the_reader_returns_only_the_window_asked_for() {
+        let path =
+            std::env::temp_dir().join(format!("dragonfly-window-{}.parquet", std::process::id()));
+        let mut frame = crate::record::tests::bare_frame();
+        let mut recorder = crate::record::Recorder::create(&path, 132_000.0).expect("a recorder");
+        for seq in 0..100u64 {
+            frame.seq = seq;
+            recorder.push(&frame).expect("a row");
+        }
+        recorder.finish().expect("a footer");
+
+        let window = Window {
+            from: Some(10),
+            stride: Some(5),
+            count: Some(4),
+        };
+        let frames = read(&path, &window).expect("readable");
+        std::fs::remove_file(&path).ok();
+
+        let seqs: Vec<u64> = frames.iter().map(|f| f.seq).collect();
+        assert_eq!(seqs, vec![10, 15, 20, 25]);
+    }
+
+    /// An absent `count` must not mean every frame in the file.
+    #[test]
+    fn an_unbounded_request_is_capped() {
+        let (_, _, count) = Window::default().resolve();
+        assert_eq!(count, MAX_FRAMES);
+        let asked = Window {
+            count: Some(usize::MAX),
+            ..Window::default()
+        };
+        assert_eq!(asked.resolve().2, MAX_FRAMES);
     }
 
     #[test]
