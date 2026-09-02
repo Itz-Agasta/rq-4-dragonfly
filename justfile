@@ -89,6 +89,18 @@ validate:
 signatures:
     cargo run --release -p twin-core --example signature_matrix
 
+# generate a recorded mission offline, far faster than real time.
+#
+# the whole pipeline runs on mission time rather than wall time, so a slow
+# degradation the twin can actually extrapolate fits inside a coffee break.
+# `--speed` on the simulator does NOT do this: the daemon stamps frames from the
+# wall clock, so a compressed run hands the filter a violent transient.
+#
+#   just mission --hours 2 --fault-cylinder 3 --fault-onset 300 \
+#       --fault-ramp 60000 --fault-scale 0.55 --out data/missions/coking.parquet
+mission *args:
+    cargo run --release -p mission-gen -- {{args}}
+
 clean:
     cargo clean
     rm -rf ui/dist node_modules ui/node_modules

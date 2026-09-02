@@ -11,11 +11,11 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use axum::extract::State;
 use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
@@ -27,6 +27,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
+use crate::replay;
 use crate::telemetry::Frame;
 use twin_core::channels::TABLE;
 use twin_core::health::{DESCRIPTORS, PARAMS};
@@ -45,6 +46,13 @@ pub struct LinkStatus {
     pub link_ok: AtomicBool,
     /// Whether the twin's residual has been small enough for long enough.
     pub twin_locked: AtomicBool,
+    /// WebSocket clients attached right now.
+    ///
+    /// Counted rather than read off the broadcast channel's subscribers, because
+    /// the mission recorder is a subscriber too: `receiver_count` reports one
+    /// client on a core nobody is watching, and this field is what an operator
+    /// checks to answer exactly that question.
+    pub ws_clients: AtomicUsize,
 }
 
 impl LinkStatus {
@@ -92,6 +100,8 @@ pub struct AppState {
     /// Bounded and small: commands are pressed by a person, so nothing legitimate
     /// fills it.
     pub commands: mpsc::Sender<Command>,
+    /// Directory recorded missions are read from and written to.
+    pub record_dir: PathBuf,
 }
 
 /// A command on its way to the bus, and the channel that reports it got there.
@@ -199,6 +209,8 @@ pub fn router(state: AppState, ui_dir: PathBuf) -> Router {
         .route("/api/health", get(health))
         .route("/api/signatures", get(signatures))
         .route("/api/fault", post(fault))
+        .route("/api/missions", get(missions))
+        .route("/api/missions/{id}", get(mission))
         .fallback_service(files)
         // The bundle is same-origin in the kiosk, but the Vite dev server is not,
         // and D7 onward is developed against it.
@@ -210,7 +222,7 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
     Json(Health {
         version: env!("CARGO_PKG_VERSION"),
         iface: state.iface.clone(),
-        clients: state.frames.receiver_count(),
+        clients: state.link.ws_clients.load(Ordering::Relaxed),
         last_seq: state.link.last_seq.load(Ordering::Relaxed),
         link_ok: state.link.link_ok.load(Ordering::Relaxed),
         twin_locked: state.link.twin_locked.load(Ordering::Relaxed),
@@ -280,6 +292,63 @@ async fn fault(
     }
 }
 
+async fn missions(State(state): State<AppState>) -> impl IntoResponse {
+    match replay::list(&state.record_dir) {
+        Ok(missions) => Json(missions).into_response(),
+        Err(error) => {
+            tracing::warn!(%error, "listing recordings");
+            (StatusCode::INTERNAL_SERVER_ERROR, "cannot list recordings").into_response()
+        }
+    }
+}
+
+/// Serve part of a recording as MessagePack, in the frame shape the WebSocket
+/// uses.
+///
+/// The same encoding and the same struct as the live feed, because replay is a
+/// data source swap: a client decodes a recorded frame with the code it already
+/// has and every derived value follows without a second implementation.
+async fn mission(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(window): Query<replay::Window>,
+) -> impl IntoResponse {
+    // Rejected here rather than sanitised, because a path that escapes the
+    // recording directory is a caller doing something no screen does.
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return (StatusCode::BAD_REQUEST, "not a mission id").into_response();
+    }
+    let path = state.record_dir.join(format!("{id}.parquet"));
+
+    // Reading a recording is hundreds of milliseconds of synchronous file and
+    // decompression work, which would stall every other request on this runtime
+    // for the duration.
+    let frames = tokio::task::spawn_blocking(move || replay::read(&path, &window)).await;
+    let frames = match frames {
+        Ok(Ok(frames)) => frames,
+        Ok(Err(error)) => {
+            tracing::warn!(%error, id, "reading a recording");
+            return (StatusCode::NOT_FOUND, "no such mission").into_response();
+        }
+        Err(error) => {
+            tracing::error!(%error, id, "the reader task failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "cannot read mission").into_response();
+        }
+    };
+
+    let Ok(payload) = rmp_serde::to_vec_named(&frames) else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "cannot encode mission").into_response();
+    };
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/msgpack")],
+        payload,
+    )
+        .into_response()
+}
+
 async fn websocket(upgrade: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
     upgrade.on_upgrade(move |socket| stream_frames(socket, state))
 }
@@ -295,6 +364,7 @@ async fn stream_frames(socket: WebSocket, state: AppState) {
     // which the next telemetry frame flushes.
     let (mut sink, mut stream) = socket.split();
     let drain = tokio::spawn(async move { while stream.next().await.is_some() {} });
+    state.link.ws_clients.fetch_add(1, Ordering::Relaxed);
     tracing::info!("websocket client attached");
 
     loop {
@@ -319,5 +389,6 @@ async fn stream_frames(socket: WebSocket, state: AppState) {
         }
     }
     drain.abort();
+    state.link.ws_clients.fetch_sub(1, Ordering::Relaxed);
     tracing::info!("websocket client detached");
 }

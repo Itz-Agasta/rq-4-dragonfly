@@ -12,13 +12,9 @@
 //! way nothing on screen would reveal. The Parquet recorder does attach as a
 //! subscriber, because it only reads.
 
-mod ingest;
-mod server;
-mod telemetry;
-
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -28,9 +24,10 @@ use socketcan::{EmbeddedFrame, Id, tokio::CanSocket};
 use tokio::sync::{broadcast, mpsc};
 use twin_core::Twin;
 
-use ingest::{Decoded, Ingest};
-use server::{AppState, LinkStatus};
-use telemetry::{Fusion, SLOW_STALE_AFTER, STALE_AFTER};
+use dragonfly_core::ingest::{Decoded, Ingest};
+use dragonfly_core::record::Recorder;
+use dragonfly_core::server::{self, AppState, LinkStatus};
+use dragonfly_core::telemetry::{self, Fusion, SLOW_STALE_AFTER, STALE_AFTER};
 
 /// Frames buffered per WebSocket client before it is declared lagged.
 ///
@@ -41,6 +38,13 @@ const CHANNEL_DEPTH: usize = 40;
 
 /// How often the link is re-checked while the bus is silent.
 const IDLE_TICK: Duration = Duration::from_millis(100);
+
+/// Frames queued for the recording thread before the forwarder starts dropping.
+///
+/// Ten seconds at the engine rate, which is far more than a flush needs and
+/// still bounded: a writer that has genuinely stopped must not grow a queue
+/// until the process runs out of memory.
+const RECORD_QUEUE: usize = 200;
 
 #[derive(Parser, Debug)]
 #[command(about = "Digital twin core: DroneCAN ingest, telemetry fusion, and the operator API")]
@@ -64,6 +68,14 @@ struct Args {
     /// Data type ID fault commands are published on. Must match the simulator.
     #[arg(long, default_value_t = dronecan_ice::FaultCommand::DEFAULT_DATA_TYPE_ID)]
     command_dtid: u16,
+
+    /// Directory mission recordings are written to.
+    #[arg(long, default_value = "data/missions")]
+    record_dir: PathBuf,
+
+    /// Do not record this run.
+    #[arg(long)]
+    no_record: bool,
 }
 
 #[tokio::main]
@@ -92,6 +104,7 @@ async fn main() -> Result<()> {
         // axes on a bus that has not started yet.
         signatures: Arc::new(twin_core::Signatures::generate(&params)),
         commands,
+        record_dir: args.record_dir.clone(),
     };
     let app = server::router(state, args.ui_dir.clone());
 
@@ -104,6 +117,20 @@ async fn main() -> Result<()> {
         ui_dir = %args.ui_dir.display(),
         "serving"
     );
+
+    // Attached before the ingest task starts, so the first frame of the mission
+    // is in the file. A recorder that misses the opening seconds cannot answer
+    // the question a replay is opened to answer, which is what the engine was
+    // doing before anyone noticed.
+    let recording = if args.no_record {
+        None
+    } else {
+        Some(Recording::start(
+            &args.record_dir,
+            params.limits.rated_power_w,
+            frames.subscribe(),
+        )?)
+    };
 
     let ingest = tokio::spawn(ingest_loop(
         args.iface.clone(),
@@ -120,7 +147,98 @@ async fn main() -> Result<()> {
         result = ingest => result.context("ingest task")??,
         _ = tokio::signal::ctrl_c() => tracing::info!("stopping"),
     }
+    // A Parquet file with no footer cannot be opened at all, so this is not
+    // housekeeping: without it every recording ends as an unreadable file and
+    // the replay screen has nothing to show for the mission that just flew.
+    if let Some(recording) = recording {
+        recording.finish();
+    }
     Ok(())
+}
+
+/// A mission recording running alongside the ingest loop.
+///
+/// Two hops rather than one. The Parquet writer is synchronous and flushes a
+/// megabyte every few thousand rows, so it lives on its own thread and cannot
+/// stall the runtime; a forwarding task moves frames from the broadcast channel
+/// onto it. Pushing directly from an async subscriber would block the executor
+/// for the length of a flush, and being slow on a broadcast channel is how a
+/// subscriber gets lagged, so the frames a replay needs would be the first
+/// thing dropped.
+struct Recording {
+    path: PathBuf,
+    forwarder: tokio::task::JoinHandle<()>,
+    writer: std::thread::JoinHandle<()>,
+}
+
+impl Recording {
+    /// Begin recording every frame published on `frames`.
+    fn start(
+        dir: &Path,
+        rated_power_w: f64,
+        mut frames: broadcast::Receiver<Arc<telemetry::Frame>>,
+    ) -> Result<Self> {
+        // Seconds since the epoch rather than a formatted date, so the name
+        // sorts chronologically as a string and no date library is pulled in to
+        // produce it.
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .context("system clock is before the epoch")?
+            .as_secs();
+        let path = dir.join(format!("mission-{stamp}.parquet"));
+        let mut recorder = Recorder::create(&path, rated_power_w)?;
+        tracing::info!(path = %path.display(), "recording");
+
+        let (tx, mut queue) = mpsc::channel::<Arc<telemetry::Frame>>(RECORD_QUEUE);
+        let forwarder = tokio::spawn(async move {
+            loop {
+                match frames.recv().await {
+                    Ok(frame) => {
+                        if tx.send(frame).await.is_err() {
+                            break;
+                        }
+                    }
+                    // The writer is behind by more than the queue. Reported
+                    // rather than fatal: a recording with a gap in it is worth
+                    // more than no recording, and the sequence numbers in the
+                    // file say exactly where the gap is.
+                    Err(broadcast::error::RecvError::Lagged(missed)) => {
+                        tracing::warn!(missed, "recorder fell behind");
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+        let writer = std::thread::spawn(move || {
+            while let Some(frame) = queue.blocking_recv() {
+                if let Err(error) = recorder.push(&frame) {
+                    tracing::error!(%error, "recording stopped");
+                    return;
+                }
+            }
+            match recorder.finish() {
+                Ok(rows) => tracing::info!(rows, "recording closed"),
+                Err(error) => tracing::error!(%error, "recording could not be closed"),
+            }
+        });
+        Ok(Self {
+            path,
+            forwarder,
+            writer,
+        })
+    }
+
+    /// Stop recording and write the footer.
+    ///
+    /// Aborting the forwarder is what drops the last sender, which ends the
+    /// writer's loop and lets it close the file. Joining is the point of the
+    /// whole method, so it is not skipped on the way out.
+    fn finish(self) {
+        self.forwarder.abort();
+        if self.writer.join().is_err() {
+            tracing::error!(path = %self.path.display(), "the recording thread panicked");
+        }
+    }
 }
 
 /// Read the bus forever, fusing what arrives into frames.

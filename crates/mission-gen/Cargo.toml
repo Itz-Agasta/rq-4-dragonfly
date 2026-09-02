@@ -1,0 +1,21 @@
+[package]
+name = "mission-gen"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+dragonfly-core.workspace = true
+dragonfly-sim.workspace = true
+dronecan-ice.workspace = true
+engine-model.workspace = true
+prognostics.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+twin-core.workspace = true
+
+[lints]
+workspace = true
