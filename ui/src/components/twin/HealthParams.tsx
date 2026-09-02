@@ -52,10 +52,20 @@ export function HealthParams({ parameters }: { parameters: Parameter[] }) {
   const marks = useRef<(HTMLSpanElement | null)[]>([]);
   const names = useRef<(HTMLSpanElement | null)[]>([]);
   const paths = useRef<(SVGPathElement | null)[]>([]);
+  const block = useRef<HTMLDivElement>(null);
+  const staleRef = useRef<HTMLSpanElement>(null);
 
   useLiveSink((frame) => {
     const twin = frame.twin;
     const live = twin !== null && isFresh(frame.ages.engine_ms);
+
+    // The traces keep their history, the same way the paired cells do, and the
+    // same way they must not keep looking current: a thirty minute trajectory
+    // drawn at full strength beside a dashed value is an old inference presented
+    // as the present one. Dimming the whole block rather than each path, because
+    // every row goes stale together.
+    if (staleRef.current) staleRef.current.hidden = live;
+    block.current?.toggleAttribute("data-stale", !live);
 
     for (let i = 0; i < parameters.length; i += 1) {
       const descriptor = parameters[i]!;
@@ -115,13 +125,22 @@ export function HealthParams({ parameters }: { parameters: Parameter[] }) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <div className="border-border flex h-[36px] shrink-0 items-center justify-between gap-[10px] border-b px-4">
-        <span className="t-section whitespace-nowrap">EST. HEALTH PARAMS</span>
+        <span className="t-section truncate whitespace-nowrap">
+          EST. HEALTH PARAMS
+          <span
+            ref={staleRef}
+            hidden
+            className="text-primary ml-[8px] text-[10px] tracking-[0.08em]"
+          >
+            · STALE
+          </span>
+        </span>
         <span className="border-structure-hi text-foreground-dim shrink-0 border border-dashed px-[7px] py-[3px] text-[10px] tracking-[0.08em]">
           ◊ INFERRED
         </span>
       </div>
       <div className="flex min-h-0 flex-1 p-3">
-        <div className="inferred flex min-h-0 flex-1 flex-col px-[10px]">
+        <div ref={block} className="inferred flex min-h-0 flex-1 flex-col px-[10px]">
           {parameters.map((p, i) => (
             <div
               key={p.name}

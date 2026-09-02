@@ -188,6 +188,10 @@ export function Strip({ title, readout, series, syncKey, minSpan, alarmWhen }: S
     return subscribe((frame) => {
       const el = valueRef.current;
       const flag = staleRef.current;
+      // The plot dims with the readout. Saying the word was the convention here
+      // first and it is not quite enough on its own: the trace is the larger
+      // object and a frozen one at full strength still reads as a live one.
+      host.current?.toggleAttribute("data-stale", !isFresh(frame.ages[ch.source]));
       if (flag) {
         // Dimming alone is not enough. A frozen trace looks exactly like a steady
         // one, and an operator reading a held value as a live one is a safety
