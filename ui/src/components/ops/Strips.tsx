@@ -10,7 +10,9 @@
  * the cursor on all of them.
  */
 
-import { FAULT_CYLINDER } from "@/components/ops/data";
+import { useMemo } from "react";
+
+import { useFaultCylinder } from "@/components/ops/fault";
 import { Strip, type StripSeries } from "@/components/Strip";
 import { CYLINDERS, type Frame } from "@/lib/telemetry";
 
@@ -21,8 +23,16 @@ const SYNC = "ops";
  *
  * Luminance carries which channel is selected: the cylinder of interest is drawn
  * at full weight and its neighbours are ghosted. Colour is not spent here.
+ *
+ * `focus` of 0 means no cylinder has been singled out, which is the state of a
+ * healthy engine and the state before a detector has fired. All four are then
+ * drawn at equal weight, because ghosting three of them would be claiming a
+ * selection that has not been made.
  */
 function cylinderSeries(prefix: string, focus: number): StripSeries[] {
+  if (focus < 1 || focus > CYLINDERS) {
+    return Array.from({ length: CYLINDERS }, (_, i) => ({ id: `${prefix}${i + 1}` }));
+  }
   const others = Array.from({ length: CYLINDERS }, (_, i) => i + 1)
     .filter((n) => n !== focus)
     .map((n) => ({ id: `${prefix}${n}`, emphasis: "ghost" as const }));
@@ -70,8 +80,6 @@ function spreadAlarm(pick: (f: Frame) => number[], cylinder: number) {
  * per-cylinder spread a coking injector produces is unmissable without being
  * clipped.
  */
-const EGT_SERIES = cylinderSeries("egt", FAULT_CYLINDER);
-const CHT_SERIES = cylinderSeries("cht", FAULT_CYLINDER);
 const RPM_SERIES: StripSeries[] = [{ id: "rpm" }, { id: "rpm_twin", emphasis: "predicted" }];
 const MAP_SERIES: StripSeries[] = [{ id: "map" }, { id: "map_twin", emphasis: "predicted" }];
 const OIL_SERIES: StripSeries[] = [{ id: "oil_p" }, { id: "oil_p_twin", emphasis: "predicted" }];
@@ -80,10 +88,18 @@ const OIL_SERIES: StripSeries[] = [{ id: "oil_p" }, { id: "oil_p_twin", emphasis
 // to draw and a dashed line here would be an invention.
 const VIB_SERIES: StripSeries[] = [{ id: "vib" }];
 
-const egtAlarm = spreadAlarm((f) => f.egt_k, FAULT_CYLINDER);
-const chtAlarm = spreadAlarm((f) => f.cht_k, FAULT_CYLINDER);
-
 export function Strips() {
+  // The bright trace and the alarm follow the cylinder the residual points at,
+  // so the strips describe the fault the engine has rather than the one the
+  // demonstration was written around. The memo matters: `Strip` rebuilds its
+  // chart when the series array changes identity, and without it that would be
+  // every render rather than every change of cylinder.
+  const fault = useFaultCylinder();
+  const egtSeries = useMemo(() => cylinderSeries("egt", fault), [fault]);
+  const chtSeries = useMemo(() => cylinderSeries("cht", fault), [fault]);
+  const egtAlarm = useMemo(() => spreadAlarm((f: Frame) => f.egt_k, fault), [fault]);
+  const chtAlarm = useMemo(() => spreadAlarm((f: Frame) => f.cht_k, fault), [fault]);
+
   return (
     <div className="border-border grid min-h-0 shrink-0 basis-[26%] grid-cols-3 grid-rows-2 border-t">
       <div className="border-border min-h-0 min-w-0 border-r border-b">
@@ -95,8 +111,8 @@ export function Strips() {
       <div className="border-border min-h-0 min-w-0 border-b">
         <Strip
           title={`EGT · cyl 1–${CYLINDERS}`}
-          readout={`egt${FAULT_CYLINDER}`}
-          series={EGT_SERIES}
+          readout={`egt${fault || 1}`}
+          series={egtSeries}
           syncKey={SYNC}
           minSpan={60}
           alarmWhen={egtAlarm}
@@ -105,8 +121,8 @@ export function Strips() {
       <div className="border-border min-h-0 min-w-0 border-r">
         <Strip
           title={`CHT · cyl 1–${CYLINDERS}`}
-          readout={`cht${FAULT_CYLINDER}`}
-          series={CHT_SERIES}
+          readout={`cht${fault || 1}`}
+          series={chtSeries}
           syncKey={SYNC}
           minSpan={24}
           alarmWhen={chtAlarm}

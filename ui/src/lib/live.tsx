@@ -29,6 +29,7 @@
 import { type RefObject, useLayoutEffect, useRef } from "react";
 
 import { NO_VALUE } from "@/lib/fmt";
+import { report } from "@/lib/report";
 import type { Frame } from "@/lib/telemetry";
 import { telemetry } from "@/store/telemetry";
 
@@ -51,13 +52,37 @@ const readouts = new Set<Sink>();
 let handle = 0;
 let lastReadout = 0;
 
+/**
+ * Run one sink, and drop it if it throws.
+ *
+ * The loop is shared by every live element in the app, so an exception escaping
+ * one sink used to end the loop: the next `requestAnimationFrame` was never
+ * reached and every readout on every screen froze at its placeholder while the
+ * socket kept delivering frames. That is indistinguishable from a dead feed and
+ * it cost a session to find once.
+ *
+ * The offending sink is removed rather than retried, because a sink that throws
+ * on one frame throws on the next sixty and the console fills faster than it can
+ * be read. One component stops updating; the rest of the app survives.
+ */
+function run(sink: Sink, frame: Frame, from: Set<Sink>): void {
+  try {
+    sink(frame);
+  } catch (error) {
+    from.delete(sink);
+    report("live sink removed after throwing", error);
+  }
+}
+
 function tick(now: number): void {
   const frame = telemetry.latest;
   if (frame) {
-    for (const sink of sinks) sink(frame);
+    // Iterated directly rather than over a copy. `run` may delete the sink it is
+    // running, and a Set's iterator tolerates the current entry being removed.
+    for (const sink of sinks) run(sink, frame, sinks);
     if (now - lastReadout >= READOUT_PERIOD_MS) {
       lastReadout = now;
-      for (const sink of readouts) sink(frame);
+      for (const sink of readouts) run(sink, frame, readouts);
     }
   }
   handle = requestAnimationFrame(tick);

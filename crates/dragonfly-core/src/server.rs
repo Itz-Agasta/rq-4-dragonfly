@@ -12,15 +12,18 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
 
 use axum::extract::State;
 use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
+use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
+use dronecan_ice::FaultCommand;
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -51,6 +54,18 @@ impl LinkStatus {
         self.link_ok.store(link_ok, Ordering::Relaxed);
         self.twin_locked.store(twin_locked, Ordering::Relaxed);
     }
+
+    /// Record that there is no socket on the bus.
+    ///
+    /// **Every path that leaves the pump calls this**, including one about to
+    /// reopen at once: `POST /api/fault` reads `link_ok` to decide whether a
+    /// command has anywhere to go, and a link latched true through a reconnect
+    /// accepts a fault the next pump discards. The sequence number is left alone
+    /// because it is history, and a dropped link does not un-see its frames.
+    pub fn down(&self) {
+        self.link_ok.store(false, Ordering::Relaxed);
+        self.twin_locked.store(false, Ordering::Relaxed);
+    }
 }
 
 /// Shared state every handler sees.
@@ -67,6 +82,52 @@ pub struct AppState {
     /// engine, and 198 floats twenty times a second would be the largest thing
     /// on the wire and never change.
     pub signatures: Arc<Signatures>,
+    /// Fault commands on their way to the bus.
+    ///
+    /// A channel rather than a socket handle, because the CAN socket is owned by
+    /// the ingest loop and is reopened whenever the bus drops. An HTTP handler
+    /// that held the socket would have to be told about every reconnection; this
+    /// way the command is queued and whichever socket is current sends it.
+    ///
+    /// Bounded and small: commands are pressed by a person, so nothing legitimate
+    /// fills it.
+    pub commands: mpsc::Sender<Command>,
+}
+
+/// A command on its way to the bus, and the channel that reports it got there.
+///
+/// **No flag sampled before the send can say whether a command reached the bus**:
+/// the handler and the ingest loop are different tasks, so a link checked as up
+/// is a link that *was* up, and every check-then-act across the two has a window
+/// where the socket dies in between. The loop answers after its write instead,
+/// which is reported by the code that did the work rather than sampled before it.
+pub type Command = (FaultCommand, oneshot::Sender<()>);
+
+/// How long a caller waits for that acknowledgement.
+///
+/// Five times `IDLE_TICK`, which bounds how long a command sits before the loop
+/// drains it on a bus with no traffic to wake it.
+const ACK_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// What `POST /api/fault` accepts.
+///
+/// Deliberately not a typed enum on the wire: the kind is the same `uint8` the
+/// DroneCAN message carries, so the browser, the HTTP body and the CAN payload
+/// all name a fault the same way and there is no third vocabulary to keep in
+/// step.
+#[derive(Debug, serde::Deserialize)]
+pub struct FaultRequest {
+    /// `FaultKind` discriminant. 0 clears every injected fault.
+    pub kind: u8,
+    /// Cylinder, 1 to 4. Ignored by faults that are not per-cylinder.
+    #[serde(default)]
+    pub cylinder: u8,
+    /// Fault-specific magnitude.
+    #[serde(default)]
+    pub severity: f32,
+    /// Seconds the fault takes to reach that magnitude.
+    #[serde(default)]
+    pub ramp_s: f32,
 }
 
 /// What `/api/signatures` answers.
@@ -137,6 +198,7 @@ pub fn router(state: AppState, ui_dir: PathBuf) -> Router {
         .route("/ws", get(websocket))
         .route("/api/health", get(health))
         .route("/api/signatures", get(signatures))
+        .route("/api/fault", post(fault))
         .fallback_service(files)
         // The bundle is same-origin in the kiosk, but the Vite dev server is not,
         // and D7 onward is developed against it.
@@ -171,6 +233,51 @@ async fn signatures(State(state): State<AppState>) -> impl IntoResponse {
             failure: DESCRIPTORS[i].failure,
         }),
     })
+}
+
+/// Ask the simulator to inject a fault.
+///
+/// **This commands a simulator and must never be wired to flight software.** It
+/// exists so a demonstration can break the engine while somebody is watching, and
+/// it travels over the same CAN link as the telemetry rather than over a side
+/// channel, so the bus is visibly bidirectional and there is one transport to
+/// explain.
+///
+/// The sequence number is assigned here rather than by the caller, so a browser
+/// that retries an HTTP request cannot make the simulator treat one press as two
+/// different commands.
+async fn fault(
+    State(state): State<AppState>,
+    Json(request): Json<FaultRequest>,
+) -> impl IntoResponse {
+    // A courtesy, not the correctness gate. It answers a different question from
+    // the acknowledgement below, "is anything alive out there", which a successful
+    // write to a virtual interface with no simulator on it cannot. Being a
+    // courtesy is why its staleness does not matter.
+    if !state.link.link_ok.load(Ordering::Relaxed) {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no route to the bus").into_response();
+    }
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed) as u8;
+    let command = FaultCommand {
+        sequence,
+        kind: request.kind,
+        cylinder: request.cylinder,
+        severity: request.severity,
+        ramp_s: request.ramp_s,
+    };
+    let (ack, landed) = oneshot::channel();
+    if let Err(error) = state.commands.try_send((command, ack)) {
+        tracing::warn!(%error, "fault command not queued");
+        return (StatusCode::SERVICE_UNAVAILABLE, "no route to the bus").into_response();
+    }
+    // Dropping `landed` on the way out closes the channel, which is how the ingest
+    // loop knows to throw the command away rather than inject it whenever the bus
+    // comes back. A fault landing at a moment nobody chose is the worse failure.
+    match tokio::time::timeout(ACK_TIMEOUT, landed).await {
+        Ok(Ok(())) => (StatusCode::ACCEPTED, Json(sequence)).into_response(),
+        _ => (StatusCode::SERVICE_UNAVAILABLE, "no route to the bus").into_response(),
+    }
 }
 
 async fn websocket(upgrade: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {

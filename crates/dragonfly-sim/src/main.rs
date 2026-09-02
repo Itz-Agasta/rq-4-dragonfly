@@ -20,8 +20,10 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use dronecan_ice::{AuxiliaryStatus, Message};
-use socketcan::{EmbeddedFrame, ExtendedId, tokio::CanSocket};
+use dronecan_ice::{
+    AuxiliaryStatus, FaultCommand, Message, MessageId, NODE_GROUND_STATION, Reassembler,
+};
+use socketcan::{EmbeddedFrame, ExtendedId, Id, tokio::CanSocket};
 use tokio::time::{MissedTickBehavior, interval};
 
 use dragonfly_sim::fault::FaultArgs;
@@ -57,6 +59,11 @@ struct Args {
     #[arg(long, default_value_t = AuxiliaryStatus::DEFAULT_DATA_TYPE_ID)]
     aux_dtid: u16,
 
+    /// Data type ID the ground station sends fault commands on. Same vendor
+    /// range and the same reason it has to be changeable.
+    #[arg(long, default_value_t = FaultCommand::DEFAULT_DATA_TYPE_ID)]
+    command_dtid: u16,
+
     /// Stop after this many simulated seconds. Runs forever if unset.
     #[arg(long)]
     duration: Option<f64>,
@@ -75,7 +82,7 @@ async fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
-    let faults = args.faults.build()?;
+    let mut faults = args.faults.build()?;
     let socket = CanSocket::open(&args.iface)
         .with_context(|| format!("opening CAN interface {}, is `just can` done?", args.iface))?;
 
@@ -86,6 +93,12 @@ async fn main() -> Result<()> {
     let mut condition = args.profile.condition_at(0.0);
     let mut plant = Plant::new(base.clone(), &condition);
     let mut sensors = Sensors::new(args.seed, faults);
+    // Commands arrive as single-frame transfers, but they go through the
+    // reassembler anyway: it is what checks the transfer id and the tail byte, and
+    // hand-rolling that check here would be a second implementation of the
+    // protocol living in a binary.
+    let mut inbound = Reassembler::new();
+    let mut last_command: Option<u8> = None;
     let mut publisher = Publisher::new(args.aux_dtid);
 
     tracing::info!(
@@ -113,6 +126,41 @@ async fn main() -> Result<()> {
     loop {
         tokio::select! {
             _ = ticker.tick() => {}
+            // Commands from the ground station. Read in the same select as the
+            // publish tick rather than in a separate task, so the fault set stays
+            // owned by one place: a command mutates it between two integration
+            // steps and never during one.
+            frame = socket.read_frame() => {
+                let frame = frame.with_context(|| format!("reading from {}", args.iface))?;
+                if let Some(command) = decode_command(&mut inbound, &frame, args.command_dtid)
+                    // Repeats of one command share a sequence, because the bus has
+                    // no delivery guarantee and the sender publishes each command
+                    // more than once.
+                    && last_command != Some(command.sequence)
+                {
+                    last_command = Some(command.sequence);
+                    match faults.command(command, t_s) {
+                        Ok(()) => {
+                            sensors.set_faults(faults);
+                            tracing::info!(
+                                sequence = command.sequence,
+                                kind = command.kind,
+                                cylinder = command.cylinder,
+                                t_s = format!("{t_s:.1}"),
+                                "fault commanded from the bus"
+                            );
+                        }
+                        Err(reason) => tracing::warn!(
+                            kind = command.kind,
+                            severity = command.severity,
+                            ramp_s = command.ramp_s,
+                            reason,
+                            "fault command refused, engine left alone"
+                        ),
+                    }
+                }
+                continue;
+            }
             _ = tokio::signal::ctrl_c() => {
                 tracing::info!(frames = published, "stopping");
                 return Ok(());
@@ -155,6 +203,39 @@ async fn main() -> Result<()> {
             return Ok(());
         }
     }
+}
+
+/// Turn one CAN frame into a fault command, or nothing.
+///
+/// Everything the simulator publishes also arrives here, so the filter is narrow:
+/// ground station source node, matching data type ID, reassembled transfer, CRC
+/// against this message's signature. **A data type ID is not an identity** and
+/// this is the one message that changes the machine. Not a security control,
+/// since DroneCAN authenticates nothing, but a stray publisher stays inert.
+fn decode_command(
+    inbound: &mut Reassembler,
+    frame: &socketcan::CanFrame,
+    command_dtid: u16,
+) -> Option<FaultCommand> {
+    let Id::Extended(id) = frame.id() else {
+        return None;
+    };
+    let message = MessageId::from_raw(id.as_raw())?;
+    if message.data_type_id != command_dtid || message.source_node_id != NODE_GROUND_STATION {
+        return None;
+    }
+    let decoded = dronecan_ice::Frame::new(id.as_raw(), frame.data())?;
+    // Monotonic time, because a transfer id times out on elapsed time and the
+    // mission clock can be compressed by `--speed`.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let transfer = inbound.push(&decoded, now)?;
+    if !transfer.crc_ok(FaultCommand::SIGNATURE) {
+        tracing::warn!("fault command failed its CRC, ignored");
+        return None;
+    }
+    FaultCommand::decode(&transfer.payload).ok()
 }
 
 #[cfg(test)]

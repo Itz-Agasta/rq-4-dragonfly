@@ -13,7 +13,7 @@
 
 import { useRef } from "react";
 
-import { TASKS } from "@/components/analysis/advisory";
+import { TASKS } from "@/lib/advisory";
 import { NO_VALUE } from "@/lib/fmt";
 import { useLiveSink } from "@/lib/live";
 import { isFresh } from "@/lib/telemetry";

@@ -65,7 +65,8 @@ pub mod signature;
 pub mod transfer;
 
 pub use messages::{
-    AuxiliaryStatus, CircuitStatus, CylinderStatus, DecodeError, EngineState, FuelTankStatus,
-    IndicatedAirspeed, Message, ReciprocatingStatus, StaticPressure, StaticTemperature,
+    AuxiliaryStatus, CircuitStatus, CylinderStatus, DecodeError, EngineState, FaultCommand,
+    FaultKind, FuelTankStatus, IndicatedAirspeed, Message, NODE_GROUND_STATION,
+    ReciprocatingStatus, StaticPressure, StaticTemperature,
 };
 pub use transfer::{Frame, MessageId, Reassembler, Transfer, TransferIdMap, frames_for};

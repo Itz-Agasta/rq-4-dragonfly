@@ -263,6 +263,17 @@ impl Sensors {
         sigma.mul_add(self.rng.normal(), value)
     }
 
+    /// Replace the fault set after a command arrives on the bus.
+    ///
+    /// The held sample is dropped with it. A frozen probe holds whatever it last
+    /// reported, so a fault set that no longer freezes anything must not keep the
+    /// old value: re-freezing later would then hold a reading from before the
+    /// command, at an operating point the engine has since left.
+    pub fn set_faults(&mut self, faults: Faults) {
+        self.faults = faults;
+        self.frozen_egt = None;
+    }
+
     /// Apply the instrument faults. `fault::Faults::corrupt_exhaust` owns the
     /// behaviour so the acceptance tests exercise the same code the bus does.
     fn instrument_faults(&mut self, mut egt_k: [f64; CYLINDERS], t_s: f64) -> [f64; CYLINDERS] {

@@ -25,7 +25,7 @@ use clap::Parser;
 use dronecan_ice::{AuxiliaryStatus, Message};
 use engine_model::EngineParams;
 use socketcan::{EmbeddedFrame, Id, tokio::CanSocket};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 use twin_core::Twin;
 
 use ingest::{Decoded, Ingest};
@@ -60,6 +60,10 @@ struct Args {
     /// Data type ID the vendor message uses. Must match the publisher.
     #[arg(long, default_value_t = AuxiliaryStatus::DEFAULT_DATA_TYPE_ID)]
     aux_dtid: u16,
+
+    /// Data type ID fault commands are published on. Must match the simulator.
+    #[arg(long, default_value_t = dronecan_ice::FaultCommand::DEFAULT_DATA_TYPE_ID)]
+    command_dtid: u16,
 }
 
 #[tokio::main]
@@ -73,6 +77,9 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
     let (frames, _) = broadcast::channel(CHANNEL_DEPTH);
+    // Depth eight, because commands come from a person pressing a control. A
+    // deeper queue would only mean holding faults that land long after the press.
+    let (commands, command_rx) = mpsc::channel(8);
     let link = Arc::new(LinkStatus::default());
     let params = engine_model::engines::ae330();
 
@@ -84,6 +91,7 @@ async fn main() -> Result<()> {
         // before the first CAN frame arrives; a screen must be able to draw its
         // axes on a bus that has not started yet.
         signatures: Arc::new(twin_core::Signatures::generate(&params)),
+        commands,
     };
     let app = server::router(state, args.ui_dir.clone());
 
@@ -100,9 +108,11 @@ async fn main() -> Result<()> {
     let ingest = tokio::spawn(ingest_loop(
         args.iface.clone(),
         args.aux_dtid,
+        args.command_dtid,
         frames,
         link,
         params,
+        command_rx,
     ));
 
     tokio::select! {
@@ -118,12 +128,15 @@ async fn main() -> Result<()> {
 /// Reconnects with a backoff rather than exiting: on a real airframe the CAN
 /// interface can go down and come back, and a health monitor that dies with it
 /// is the one thing that must not happen.
+#[allow(clippy::too_many_arguments)]
 async fn ingest_loop(
     iface: String,
     auxiliary_data_type_id: u16,
+    command_data_type_id: u16,
     frames: broadcast::Sender<Arc<telemetry::Frame>>,
     link: Arc<LinkStatus>,
     params: EngineParams,
+    mut commands: mpsc::Receiver<server::Command>,
 ) -> Result<()> {
     // The twin is built per connection rather than per process. A bus that has
     // been down for seconds has left the estimate describing an engine that has
@@ -133,14 +146,23 @@ async fn ingest_loop(
         match CanSocket::open(&iface) {
             Ok(socket) => {
                 backoff = Duration::from_millis(250);
-                if let Err(error) =
-                    pump(&socket, auxiliary_data_type_id, &frames, &link, &params).await
+                if let Err(error) = pump(
+                    &socket,
+                    auxiliary_data_type_id,
+                    command_data_type_id,
+                    &frames,
+                    &link,
+                    &params,
+                    &mut commands,
+                )
+                .await
                 {
+                    link.down();
                     tracing::warn!(%error, "CAN read failed, reopening");
                 }
             }
             Err(error) => {
-                link.record(0, false, false);
+                link.down();
                 tracing::warn!(%error, iface = %iface, "cannot open interface, is `just can` done?");
             }
         }
@@ -149,12 +171,15 @@ async fn ingest_loop(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn pump(
     socket: &CanSocket,
     auxiliary_data_type_id: u16,
+    command_data_type_id: u16,
     frames: &broadcast::Sender<Arc<telemetry::Frame>>,
     link: &LinkStatus,
     params: &EngineParams,
+    commands: &mut mpsc::Receiver<server::Command>,
 ) -> Result<()> {
     let mut ingest = Ingest::new(auxiliary_data_type_id);
     let mut fusion = Fusion::new();
@@ -164,11 +189,31 @@ async fn pump(
     // has no business knowing that anyone is extrapolating it.
     let mut trends = prognostics::Trends::new();
     let mut logged = Instant::now();
+    let mut transfer_ids = dronecan_ice::TransferIdMap::new();
 
     loop {
         // A timeout rather than a plain read, so a silent bus still produces
         // frames. Without this the last frame a client saw stays on screen
         // looking live, which is exactly the failure the stale flag exists for.
+        // Commands are drained before the read rather than raced against it in a
+        // select: the read has a timeout that makes it return on a silent bus, so
+        // racing them would mean a command waiting up to that timeout behind a
+        // bus that is already quiet.
+        while let Ok((command, ack)) = commands.try_recv() {
+            // A caller that has stopped waiting has already been told this did not
+            // land, so sending it would inject a fault at a moment nobody chose.
+            // That is what happens to anything queued while the bus was away.
+            if ack.is_closed() {
+                tracing::warn!(
+                    sequence = command.sequence,
+                    "fault command dropped, nobody waiting"
+                );
+                continue;
+            }
+            send_command(socket, command_data_type_id, &mut transfer_ids, command).await?;
+            let _ = ack.send(());
+        }
+
         let read = tokio::time::timeout(IDLE_TICK, socket.read_frame()).await;
         let now = Instant::now();
 
@@ -243,4 +288,54 @@ async fn pump(
             }
         }
     }
+}
+
+/// Publish one fault command onto the bus, several times.
+///
+/// **Repeated rather than acknowledged.** CAN gives no delivery guarantee and this
+/// system implements no service protocol, so the same command goes out three times
+/// carrying one sequence number; the simulator applies the first copy it sees and
+/// ignores the rest. Losing two of three still lands the command, and a duplicate
+/// costs nothing.
+async fn send_command(
+    socket: &CanSocket,
+    data_type_id: u16,
+    transfer_ids: &mut dronecan_ice::TransferIdMap,
+    command: dronecan_ice::FaultCommand,
+) -> Result<()> {
+    use dronecan_ice::{Message, MessageId, NODE_GROUND_STATION, frames_for};
+
+    /// Copies of each command. Three is two more than a lossless bus needs.
+    const COPIES: usize = 3;
+
+    let id = MessageId {
+        data_type_id,
+        source_node_id: NODE_GROUND_STATION,
+        priority: 20,
+    };
+    let payload = command.encode();
+
+    for _ in 0..COPIES {
+        let transfer_id = transfer_ids.next(NODE_GROUND_STATION, data_type_id);
+        for frame in frames_for(
+            id,
+            dronecan_ice::FaultCommand::SIGNATURE,
+            &payload,
+            transfer_id,
+        ) {
+            let raw = socketcan::ExtendedId::new(frame.id()).context("command id over 29 bits")?;
+            let out = socketcan::CanFrame::new(raw, frame.data()).context("command payload")?;
+            socket
+                .write_frame(out)
+                .await
+                .context("writing a fault command")?;
+        }
+    }
+    tracing::info!(
+        sequence = command.sequence,
+        kind = command.kind,
+        cylinder = command.cylinder,
+        "fault command published"
+    );
+    Ok(())
 }

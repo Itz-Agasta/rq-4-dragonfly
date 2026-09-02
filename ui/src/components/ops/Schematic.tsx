@@ -13,9 +13,9 @@
 import { useRef } from "react";
 import { useNavigate } from "react-router";
 
-import { FAULT_CYLINDER } from "@/components/ops/data";
+import { useFaultCylinder } from "@/components/ops/fault";
+import { InjectDrawer } from "@/components/ops/InjectDrawer";
 import { SchematicDrawing } from "@/components/ops/SchematicDrawing";
-import { Button } from "@/components/ui/button";
 import { fmt, grouped, NO_VALUE } from "@/lib/fmt";
 import { useLiveSink, useLiveText } from "@/lib/live";
 import { type Frame, isFresh } from "@/lib/telemetry";
@@ -155,7 +155,7 @@ function Unit({ children }: { children: string }) {
 }
 
 /** Callouts and their leader lines, in the drawing's 1120x610 space. */
-function Overlay() {
+function Overlay({ fault }: { fault: number }) {
   return (
     <svg
       viewBox="0 0 1120 610"
@@ -173,7 +173,7 @@ function Overlay() {
             y1="54"
             x2={352 + i * 100}
             y2="62"
-            stroke={i + 1 === FAULT_CYLINDER ? ACCENT : KEY_EDGE}
+            stroke={i + 1 === fault ? ACCENT : KEY_EDGE}
           />
         ))}
         <line x1="114" y1="54" x2="114" y2="118" />
@@ -191,7 +191,7 @@ function Overlay() {
           label={`EGT ${i + 1}`}
           sources={ENGINE}
           channel={`egt${i + 1}`}
-          accent={i + 1 === FAULT_CYLINDER}
+          accent={i + 1 === fault}
         >
           <LiveSpan select={(f) => fmt(f.egt_k[i] ?? Number.NaN, 0)} />
           <Unit>K</Unit>
@@ -239,6 +239,7 @@ function Overlay() {
 
 export function Schematic() {
   const showDotGrid = useApp((s) => s.showDotGrid);
+  const fault = useFaultCylinder();
 
   return (
     <section className="bg-card marks relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -255,14 +256,12 @@ export function Schematic() {
           alignment the lattice depends on. Near-white outline, never accent: the
           accent means alarm, and a button is not one.
         */}
-        <Button size="sm" className="shrink-0" disabled>
-          INJECT FAULT
-        </Button>
+        <InjectDrawer />
       </div>
 
       <div className="relative min-h-0 min-w-0 flex-1">
-        <SchematicDrawing faultCylinder={FAULT_CYLINDER} showDotGrid={showDotGrid} />
-        <Overlay />
+        <SchematicDrawing faultCylinder={fault} showDotGrid={showDotGrid} />
+        <Overlay fault={fault} />
       </div>
     </section>
   );

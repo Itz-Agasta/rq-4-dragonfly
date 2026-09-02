@@ -14,6 +14,7 @@
 
 import { Ring } from "@/lib/ring";
 import type { Frame } from "@/lib/telemetry";
+import { EventLog } from "@/store/events";
 import { CHANNELS, RECORDED } from "@/store/frame";
 import { ThetaHistory } from "@/store/theta";
 import { TwinHistory } from "@/store/twin";
@@ -63,6 +64,15 @@ class TelemetryStore {
    */
   readonly twin = new TwinHistory(CAPACITY);
 
+  /**
+   * Mission events, derived from the frames as they arrive.
+   *
+   * Fed here rather than from a screen so the log is complete whether or not
+   * anyone was looking at OPS when the event happened, which is the only way an
+   * alert stack is worth having.
+   */
+  readonly events = new EventLog();
+
   /** Most recent frame, or null before the first one arrives. */
   latest: Frame | null = null;
 
@@ -70,6 +80,7 @@ class TelemetryStore {
     this.latest = frame;
     this.theta.push(frame);
     this.twin.push(frame);
+    this.events.push(frame);
     this.time.push(Number.isFinite(frame.t_s) ? frame.t_s : 0);
 
     for (const id of RECORDED) {

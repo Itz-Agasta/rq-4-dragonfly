@@ -23,10 +23,24 @@
 
 use anyhow::{Result, ensure};
 use clap::Args;
+use dronecan_ice::{FaultCommand, FaultKind};
 use engine_model::{CYLINDERS, EngineParams};
 
 /// Shape constant for the growth curve. Three time constants reaches 95%.
 const DECAY: f64 = 3.0;
+
+// Named rather than repeated as literals: the command line and the bus are two
+// entry points into one fault set, and a range that drifted between them would
+// let one build an engine the other rejects. Both exclude zero separately.
+
+/// Injector flow scale coking may settle at, as a fraction of nominal.
+const COKING_SCALE: std::ops::Range<f64> = 0.0..1.0;
+
+/// Fraction of firings a misfire may fail.
+const MISFIRE_RATE: std::ops::RangeInclusive<f64> = 0.0..=1.0;
+
+/// Radiator effectiveness fouling may settle at, as a fraction of clean.
+const COOLING_SCALE: std::ops::Range<f64> = 0.0..1.0;
 
 /// Severity at a given simulated time, 0 before the onset and 1 at the end of the
 /// ramp.
@@ -256,6 +270,17 @@ impl Faults {
     /// describing an already worn engine composes with an injected fault rather
     /// than being overwritten by it.
     pub fn apply(&self, params: &mut EngineParams, base: &EngineParams, t_s: f64) {
+        // Restored from `base` first, every call, so this is a pure function of
+        // the fault set rather than an accumulation of past ones. Two things
+        // depend on it and neither is hypothetical: a fault cleared over the bus
+        // has to give the engine back, and a fault moved to another cylinder has
+        // to leave the one it came from healthy. Writing only the faulted
+        // parameter left the last degraded value in place forever, which on a
+        // cleared engine looked exactly like a command that never arrived.
+        params.cylinder.injector_scale = base.cylinder.injector_scale;
+        params.cylinder.combustion_efficiency = base.cylinder.combustion_efficiency;
+        params.cooling.radiator_effectiveness = base.cooling.radiator_effectiveness;
+
         if let Some(f) = self.injector {
             params.cylinder.injector_scale[f.cylinder] =
                 base.cylinder.injector_scale[f.cylinder] * f.scale_at(t_s);
@@ -268,6 +293,102 @@ impl Faults {
             params.cooling.radiator_effectiveness =
                 base.cooling.radiator_effectiveness * f.scale_at(t_s);
         }
+    }
+
+    /// Apply a fault commanded over the bus, starting from now.
+    ///
+    /// The command carries no onset because a commanded fault begins when it
+    /// arrives: `t_s` is the simulated instant the frame was decoded, and every
+    /// ramp runs from there. That is the difference from the command line
+    /// arguments, which schedule a fault at a time chosen before the run starts.
+    ///
+    /// `&'static str` and not a `thiserror` enum: the one caller logs the reason
+    /// and has no other move to make, so variants would serve nothing.
+    ///
+    /// Returns why a command was rejected, and applies nothing when it is. An
+    /// unknown kind is one, so an older simulator leaves the engine alone rather
+    /// than guessing. **The bus is not trusted**: a severity is a float16 anything
+    /// on the interface can write, and a non-finite one propagates through the
+    /// integration until every published channel is NaN.
+    ///
+    /// A commanded fault **replaces** the one of its kind rather than composing
+    /// with it. Two coking faults on one cylinder would otherwise ramp from two
+    /// different onsets and the settled value would depend on the order the
+    /// buttons were pressed.
+    pub fn command(&mut self, command: FaultCommand, t_s: f64) -> Result<(), &'static str> {
+        let Some(kind) = FaultKind::from_u8(command.kind) else {
+            return Err("unknown fault kind");
+        };
+        // One based on the wire, zero based here, and clamped rather than
+        // rejected: a cylinder index out of range is a ground station bug, and
+        // dropping the command silently would look like the bus lost it.
+        let cylinder = usize::from(command.cylinder.clamp(1, CYLINDERS as u8) - 1);
+        let severity = f64::from(command.severity);
+        let ramp_s = f64::from(command.ramp_s);
+        if !ramp_s.is_finite() || ramp_s < 0.0 {
+            return Err("ramp is not a duration in seconds");
+        }
+        if !severity.is_finite() {
+            return Err("severity is not finite");
+        }
+        match kind {
+            FaultKind::InjectorCoking if !COKING_SCALE.contains(&severity) => {
+                return Err("coking severity is not a fraction of nominal injector flow below 1.0");
+            }
+            FaultKind::Misfire if !MISFIRE_RATE.contains(&severity) || severity <= 0.0 => {
+                return Err("misfire severity is not a fraction of firings above 0.0");
+            }
+            FaultKind::CoolingDegradation if !COOLING_SCALE.contains(&severity) => {
+                return Err(
+                    "cooling severity is not a fraction of nominal radiator effectiveness below 1.0",
+                );
+            }
+            FaultKind::SensorDrift if severity == 0.0 => {
+                return Err("a drift of 0 K/h injects nothing");
+            }
+            _ => {}
+        }
+
+        match kind {
+            FaultKind::Clear => *self = Self::default(),
+            FaultKind::InjectorCoking => {
+                self.injector = Some(InjectorCoking {
+                    cylinder,
+                    onset_s: t_s,
+                    ramp_s,
+                    final_scale: severity,
+                });
+            }
+            FaultKind::Misfire => {
+                self.misfire = Some(Misfire {
+                    cylinder,
+                    onset_s: t_s,
+                    ramp_s,
+                    final_rate: severity,
+                });
+            }
+            FaultKind::SensorDrift => {
+                self.drift = Some(SensorDrift {
+                    cylinder,
+                    onset_s: t_s,
+                    rate_k_per_h: severity,
+                });
+            }
+            FaultKind::SensorFreeze => {
+                self.freeze = Some(SensorFreeze {
+                    cylinder,
+                    onset_s: t_s,
+                });
+            }
+            FaultKind::CoolingDegradation => {
+                self.cooling = Some(CoolingDegradation {
+                    onset_s: t_s,
+                    ramp_s,
+                    final_scale: severity,
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Corrupt the exhaust readings the way a failing instrument would.
@@ -289,6 +410,127 @@ impl Faults {
             && t_s >= f.onset_s
         {
             egt_k[f.cylinder] = *held.get_or_insert(egt_k[f.cylinder]);
+        }
+    }
+}
+
+#[cfg(test)]
+mod command_tests {
+    use super::*;
+    use dronecan_ice::FaultKind;
+
+    fn command(kind: FaultKind, cylinder: u8, severity: f32, ramp_s: f32) -> FaultCommand {
+        FaultCommand {
+            sequence: 0,
+            kind: kind as u8,
+            cylinder,
+            severity,
+            ramp_s,
+        }
+    }
+
+    /// The one a live run found: clearing has to give the engine back.
+    ///
+    /// `apply` used to write only the faulted parameter, so a cleared fault left
+    /// the last degraded value in the plant for the rest of the mission and the
+    /// clear looked like a command that never arrived.
+    #[test]
+    fn clearing_restores_the_engine() {
+        let base = engine_model::engines::ae330();
+        let mut params = base.clone();
+        let mut faults = Faults::default();
+
+        assert!(
+            faults
+                .command(command(FaultKind::InjectorCoking, 3, 0.72, 0.0), 0.0)
+                .is_ok()
+        );
+        faults.apply(&mut params, &base, 600.0);
+        let coked = params.cylinder.injector_scale[2];
+        assert!(
+            coked < base.cylinder.injector_scale[2] * 0.8,
+            "fault applied"
+        );
+
+        assert!(
+            faults
+                .command(command(FaultKind::Clear, 0, 0.0, 0.0), 600.0)
+                .is_ok()
+        );
+        faults.apply(&mut params, &base, 900.0);
+        assert_eq!(
+            params.cylinder.injector_scale[2],
+            base.cylinder.injector_scale[2]
+        );
+    }
+
+    /// Moving a fault to another cylinder has to leave the first one healthy.
+    #[test]
+    fn a_moved_fault_leaves_its_old_cylinder_alone() {
+        let base = engine_model::engines::ae330();
+        let mut params = base.clone();
+        let mut faults = Faults::default();
+
+        assert!(
+            faults
+                .command(command(FaultKind::InjectorCoking, 3, 0.72, 0.0), 0.0)
+                .is_ok()
+        );
+        faults.apply(&mut params, &base, 600.0);
+        assert!(
+            faults
+                .command(command(FaultKind::InjectorCoking, 1, 0.72, 0.0), 600.0)
+                .is_ok()
+        );
+        faults.apply(&mut params, &base, 1200.0);
+
+        assert_eq!(
+            params.cylinder.injector_scale[2],
+            base.cylinder.injector_scale[2]
+        );
+        assert!(params.cylinder.injector_scale[0] < base.cylinder.injector_scale[0] * 0.8);
+    }
+
+    #[test]
+    fn an_unknown_kind_changes_nothing() {
+        let mut faults = Faults::default();
+        let unknown = FaultCommand {
+            sequence: 0,
+            kind: 200,
+            cylinder: 1,
+            severity: 1.0,
+            ramp_s: 0.0,
+        };
+        assert!(faults.command(unknown, 0.0).is_err());
+        assert!(faults.injector.is_none() && faults.misfire.is_none());
+    }
+
+    /// Anything on the interface can write a float16, and a non-finite one would
+    /// otherwise reach the integrator and turn every published channel into NaN.
+    #[test]
+    fn a_severity_the_bus_cannot_mean_is_refused() {
+        let refused = [
+            command(FaultKind::InjectorCoking, 3, f32::NAN, 0.0),
+            command(FaultKind::InjectorCoking, 3, -0.5, 0.0),
+            // 1.0 is nominal flow, which injects nothing at all.
+            command(FaultKind::InjectorCoking, 3, 1.0, 0.0),
+            command(FaultKind::Misfire, 3, 0.0, 0.0),
+            command(FaultKind::Misfire, 3, 1.5, 0.0),
+            command(FaultKind::CoolingDegradation, 0, f32::INFINITY, 0.0),
+            command(FaultKind::SensorDrift, 3, 0.0, 0.0),
+            command(FaultKind::InjectorCoking, 3, 0.72, f32::NAN),
+            command(FaultKind::InjectorCoking, 3, 0.72, -1.0),
+        ];
+        for c in refused {
+            let mut faults = Faults::default();
+            assert!(faults.command(c, 0.0).is_err(), "{c:?} was accepted");
+            assert!(
+                faults.injector.is_none()
+                    && faults.misfire.is_none()
+                    && faults.cooling.is_none()
+                    && faults.drift.is_none(),
+                "{c:?} changed the engine"
+            );
         }
     }
 }
@@ -398,7 +640,7 @@ impl FaultArgs {
         if let Some(c) = self.fault_cylinder {
             check_timing(self.fault_onset, self.fault_ramp, "fault")?;
             ensure!(
-                self.fault_scale.is_finite() && (0.0..1.0).contains(&self.fault_scale),
+                self.fault_scale.is_finite() && COKING_SCALE.contains(&self.fault_scale),
                 "--fault-scale is the fraction of nominal injector flow the fault settles at, so it must be at least 0.0 and below 1.0 to remove any fuel at all, got {}",
                 self.fault_scale
             );
@@ -413,7 +655,7 @@ impl FaultArgs {
         if let Some(c) = self.misfire_cylinder {
             check_timing(self.misfire_onset, self.misfire_ramp, "misfire")?;
             ensure!(
-                self.misfire_rate.is_finite() && (0.0..=1.0).contains(&self.misfire_rate),
+                self.misfire_rate.is_finite() && MISFIRE_RATE.contains(&self.misfire_rate),
                 "--misfire-rate is the fraction of firings that fail, so it must be between 0.0 and 1.0, got {}",
                 self.misfire_rate
             );
@@ -432,7 +674,7 @@ impl FaultArgs {
         if self.cooling_fault {
             check_timing(self.cooling_onset, self.cooling_ramp, "cooling")?;
             ensure!(
-                self.cooling_scale.is_finite() && (0.0..1.0).contains(&self.cooling_scale),
+                self.cooling_scale.is_finite() && COOLING_SCALE.contains(&self.cooling_scale),
                 "--cooling-scale is the fraction of nominal radiator effectiveness the fault settles at, so it must be at least 0.0 and below 1.0 to degrade cooling at all, got {}",
                 self.cooling_scale
             );
