@@ -12,6 +12,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
 
 use axum::extract::State;
 use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
@@ -22,7 +23,7 @@ use axum::{Json, Router};
 use dronecan_ice::FaultCommand;
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -89,10 +90,24 @@ pub struct AppState {
     /// way the command is queued and whichever socket is current sends it.
     ///
     /// Bounded and small: commands are pressed by a person, so nothing legitimate
-    /// fills it. **Space in the queue is not a route to the bus**, since the
-    /// ingest loop drains it only while its socket is open. See [`LinkStatus::down`].
-    pub commands: mpsc::Sender<FaultCommand>,
+    /// fills it.
+    pub commands: mpsc::Sender<Command>,
 }
+
+/// A command on its way to the bus, and the channel that reports it got there.
+///
+/// **No flag sampled before the send can say whether a command reached the bus**:
+/// the handler and the ingest loop are different tasks, so a link checked as up
+/// is a link that *was* up, and every check-then-act across the two has a window
+/// where the socket dies in between. The loop answers after its write instead,
+/// which is reported by the code that did the work rather than sampled before it.
+pub type Command = (FaultCommand, oneshot::Sender<()>);
+
+/// How long a caller waits for that acknowledgement.
+///
+/// Five times `IDLE_TICK`, which bounds how long a command sits before the loop
+/// drains it on a bus with no traffic to wake it.
+const ACK_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// What `POST /api/fault` accepts.
 ///
@@ -235,9 +250,10 @@ async fn fault(
     State(state): State<AppState>,
     Json(request): Json<FaultRequest>,
 ) -> impl IntoResponse {
-    // `try_send` succeeding says the queue has space, never that anything is
-    // listening, so with the bus down eight commands queue and all land when it
-    // returns. Checked before a sequence is spent: the simulator de-duplicates on it.
+    // A courtesy, not the correctness gate. It answers a different question from
+    // the acknowledgement below, "is anything alive out there", which a successful
+    // write to a virtual interface with no simulator on it cannot. Being a
+    // courtesy is why its staleness does not matter.
     if !state.link.link_ok.load(Ordering::Relaxed) {
         return (StatusCode::SERVICE_UNAVAILABLE, "no route to the bus").into_response();
     }
@@ -250,14 +266,17 @@ async fn fault(
         severity: request.severity,
         ramp_s: request.ramp_s,
     };
-    match state.commands.try_send(command) {
-        Ok(()) => (StatusCode::ACCEPTED, Json(sequence)).into_response(),
-        // Full with the link up means commands are arriving faster than the bus
-        // takes them, which a person pressing a control cannot do.
-        Err(error) => {
-            tracing::warn!(%error, "fault command not queued");
-            (StatusCode::SERVICE_UNAVAILABLE, "no route to the bus").into_response()
-        }
+    let (ack, landed) = oneshot::channel();
+    if let Err(error) = state.commands.try_send((command, ack)) {
+        tracing::warn!(%error, "fault command not queued");
+        return (StatusCode::SERVICE_UNAVAILABLE, "no route to the bus").into_response();
+    }
+    // Dropping `landed` on the way out closes the channel, which is how the ingest
+    // loop knows to throw the command away rather than inject it whenever the bus
+    // comes back. A fault landing at a moment nobody chose is the worse failure.
+    match tokio::time::timeout(ACK_TIMEOUT, landed).await {
+        Ok(Ok(())) => (StatusCode::ACCEPTED, Json(sequence)).into_response(),
+        _ => (StatusCode::SERVICE_UNAVAILABLE, "no route to the bus").into_response(),
     }
 }
 

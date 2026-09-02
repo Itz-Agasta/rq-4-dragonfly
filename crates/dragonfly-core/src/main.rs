@@ -136,7 +136,7 @@ async fn ingest_loop(
     frames: broadcast::Sender<Arc<telemetry::Frame>>,
     link: Arc<LinkStatus>,
     params: EngineParams,
-    mut commands: mpsc::Receiver<dronecan_ice::FaultCommand>,
+    mut commands: mpsc::Receiver<server::Command>,
 ) -> Result<()> {
     // The twin is built per connection rather than per process. A bus that has
     // been down for seconds has left the estimate describing an engine that has
@@ -179,7 +179,7 @@ async fn pump(
     frames: &broadcast::Sender<Arc<telemetry::Frame>>,
     link: &LinkStatus,
     params: &EngineParams,
-    commands: &mut mpsc::Receiver<dronecan_ice::FaultCommand>,
+    commands: &mut mpsc::Receiver<server::Command>,
 ) -> Result<()> {
     let mut ingest = Ingest::new(auxiliary_data_type_id);
     let mut fusion = Fusion::new();
@@ -191,17 +191,6 @@ async fn pump(
     let mut logged = Instant::now();
     let mut transfer_ids = dronecan_ice::TransferIdMap::new();
 
-    // Anything queued before this socket existed was aimed at a bus that has since
-    // gone away, so sending it now injects a fault at a moment nobody chose. The
-    // handler refuses while the link is down; this catches the press that raced it.
-    while let Ok(stale) = commands.try_recv() {
-        tracing::warn!(
-            sequence = stale.sequence,
-            kind = stale.kind,
-            "fault command dropped, the bus went away before it was sent"
-        );
-    }
-
     loop {
         // A timeout rather than a plain read, so a silent bus still produces
         // frames. Without this the last frame a client saw stays on screen
@@ -210,8 +199,19 @@ async fn pump(
         // select: the read has a timeout that makes it return on a silent bus, so
         // racing them would mean a command waiting up to that timeout behind a
         // bus that is already quiet.
-        while let Ok(command) = commands.try_recv() {
+        while let Ok((command, ack)) = commands.try_recv() {
+            // A caller that has stopped waiting has already been told this did not
+            // land, so sending it would inject a fault at a moment nobody chose.
+            // That is what happens to anything queued while the bus was away.
+            if ack.is_closed() {
+                tracing::warn!(
+                    sequence = command.sequence,
+                    "fault command dropped, nobody waiting"
+                );
+                continue;
+            }
             send_command(socket, command_data_type_id, &mut transfer_ids, command).await?;
+            let _ = ack.send(());
         }
 
         let read = tokio::time::timeout(IDLE_TICK, socket.read_frame()).await;
