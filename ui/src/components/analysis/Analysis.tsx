@@ -12,7 +12,7 @@ import { DetectionBar } from "@/components/analysis/DetectionBar";
 import { Hypotheses } from "@/components/analysis/Hypotheses";
 import { Matrix } from "@/components/analysis/Matrix";
 import { Prognosis } from "@/components/analysis/Prognosis";
-import { useMatrix } from "@/components/analysis/signatures";
+import { useMatrix } from "@/lib/signatures";
 
 export function Analysis() {
   const data = useMatrix();

@@ -11,6 +11,7 @@ import { Analysis } from "@/components/analysis/Analysis";
 import { NotBuilt } from "@/components/app/NotBuilt";
 import { Shell } from "@/components/app/Shell";
 import { Ops } from "@/components/ops/Ops";
+import { Twin } from "@/components/twin/Twin";
 
 export const router = createBrowserRouter([
   {
@@ -19,10 +20,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <Navigate to="/ops" replace /> },
       { path: "ops", element: <Ops /> },
-      {
-        path: "twin",
-        element: <NotBuilt title="TWIN" note="measured against physics · not built" />,
-      },
+      { path: "twin", element: <Twin /> },
       { path: "analysis", element: <Analysis /> },
       {
         path: "simulate",

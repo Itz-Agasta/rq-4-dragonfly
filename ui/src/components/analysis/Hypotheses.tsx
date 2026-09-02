@@ -14,9 +14,9 @@
 
 import { useRef } from "react";
 
-import type { Matrix } from "@/components/analysis/signatures";
 import { fmt, NO_VALUE } from "@/lib/fmt";
 import { useLiveSink } from "@/lib/live";
+import type { Matrix } from "@/lib/signatures";
 import { isFresh, SUBSYSTEMS } from "@/lib/telemetry";
 
 /** Runners-up shown beneath the winner. Four rows fill the column at 900px. */

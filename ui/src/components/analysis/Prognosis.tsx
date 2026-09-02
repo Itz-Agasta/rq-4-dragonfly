@@ -22,10 +22,10 @@ import { useRef } from "react";
 
 import { AdvisoryPanel } from "@/components/analysis/AdvisoryPanel";
 import { AXIS_MAX_H, AXIS_TICKS, logX } from "@/components/analysis/prognosis";
-import type { Parameter } from "@/components/analysis/signatures";
 import { Trajectory } from "@/components/analysis/Trajectory";
 import { fmt, NO_VALUE } from "@/lib/fmt";
 import { useLiveSink } from "@/lib/live";
+import type { Parameter } from "@/lib/signatures";
 import { isFresh, SUBSYSTEMS } from "@/lib/telemetry";
 
 /** Fill of the limiting row's interval band. The only accent spent in this block. */

@@ -18,6 +18,7 @@ import "uplot/dist/uPlot.min.css";
 import { fmt, grouped, NO_VALUE } from "@/lib/fmt";
 import { subscribe } from "@/lib/live";
 import { type Frame, isFresh } from "@/lib/telemetry";
+import { token } from "@/lib/token";
 import { channel } from "@/store/frame";
 import { HISTORY_SECONDS, telemetry } from "@/store/telemetry";
 
@@ -59,19 +60,6 @@ export interface StripProps {
    * is worse than no accent at all.
    */
   alarmWhen?: (frame: Frame) => boolean;
-}
-
-/**
- * Resolve a theme token to a concrete colour.
- *
- * uPlot hands `stroke` straight to the canvas 2D context, and `strokeStyle` does
- * not understand `var(--x)` — it silently ignores the assignment and keeps the
- * previous value, so a trace styled with a CSS variable draws in black on black
- * and looks like no data at all. SVG resolves variables and canvas does not; this
- * is the seam between them.
- */
-function token(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
 /**
@@ -200,6 +188,10 @@ export function Strip({ title, readout, series, syncKey, minSpan, alarmWhen }: S
     return subscribe((frame) => {
       const el = valueRef.current;
       const flag = staleRef.current;
+      // The plot dims with the readout. Saying the word was the convention here
+      // first and it is not quite enough on its own: the trace is the larger
+      // object and a frozen one at full strength still reads as a live one.
+      host.current?.toggleAttribute("data-stale", !isFresh(frame.ages[ch.source]));
       if (flag) {
         // Dimming alone is not enough. A frozen trace looks exactly like a steady
         // one, and an operator reading a held value as a live one is a safety

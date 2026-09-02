@@ -17,9 +17,9 @@
 import { useRef } from "react";
 
 import { focus } from "@/components/analysis/prognosis";
-import type { Parameter } from "@/components/analysis/signatures";
 import { fmt, missionClock, NO_VALUE } from "@/lib/fmt";
 import { useLiveSink } from "@/lib/live";
+import type { Parameter } from "@/lib/signatures";
 import { isFresh } from "@/lib/telemetry";
 import { telemetry } from "@/store/telemetry";
 

@@ -3,7 +3,7 @@
  * parameter the trajectory follows.
  */
 
-import type { Parameter } from "@/components/analysis/signatures";
+import type { Parameter } from "@/lib/signatures";
 import type { Frame } from "@/lib/telemetry";
 
 /**
