@@ -396,7 +396,7 @@ impl Fusion {
 
 /// Density of the heavy fuel this engine burns, kg/m3. **published** for Jet A-1
 /// at 15 C.
-const FUEL_DENSITY_KG_M3: f32 = 804.0;
+pub const FUEL_DENSITY_KG_M3: f32 = 804.0;
 
 /// Age of a source, clamped so it survives the trip into JavaScript.
 ///
