@@ -11,6 +11,7 @@
  */
 
 import { useRef } from "react";
+import { useNavigate } from "react-router";
 
 import { FAULT_CYLINDER } from "@/components/ops/data";
 import { SchematicDrawing } from "@/components/ops/SchematicDrawing";
@@ -53,12 +54,23 @@ interface CalloutProps {
    */
   sources: readonly SourceKey[];
   accent?: boolean;
+  /**
+   * Channel this box opens on TWIN, if it has one.
+   *
+   * A box without one is not a dead link, it is a reading with no twin behind
+   * it, and the two must not look the same: only the ones that resolve are
+   * given a hover state and a focus ring.
+   */
+  channel?: string;
   children: React.ReactNode;
 }
 
-function Callout({ x, y, width, label, sources, accent = false, children }: CalloutProps) {
+function Callout({ x, y, width, label, sources, accent = false, channel, children }: CalloutProps) {
   const value = useRef<SVGTextElement>(null);
   const flag = useRef<SVGTSpanElement>(null);
+
+  const navigate = useNavigate();
+  const select = useApp((s) => s.select);
 
   useLiveSink((f) => {
     // Any rather than all, deliberately. Marking a live value stale understates
@@ -74,8 +86,34 @@ function Callout({ x, y, width, label, sources, accent = false, children }: Call
     if (mark && mark.textContent !== text) mark.textContent = text;
   });
 
+  const follow = () => {
+    if (!channel) return;
+    select({ channel });
+    void navigate("/twin");
+  };
+
   return (
-    <g>
+    <g
+      // Screens are drill-downs: this is the click that follows a fault from a
+      // reading to the disagreement behind it, rather than navigating to TWIN
+      // and hunting for the channel again.
+      {...(channel
+        ? {
+            role: "link",
+            tabIndex: 0,
+            "aria-label": `${label}, open on TWIN`,
+            onClick: follow,
+            onKeyDown: (e: React.KeyboardEvent) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                follow();
+              }
+            },
+            className:
+              "pointer-events-auto cursor-pointer [&>rect]:hover:fill-[var(--accent)] focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]",
+          }
+        : { "aria-hidden": true })}
+    >
       <rect
         x={x}
         y={y}
@@ -125,10 +163,9 @@ function Overlay() {
       className="pointer-events-none absolute inset-0"
       width="100%"
       height="100%"
-      aria-hidden="true"
       style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
     >
-      <g stroke={KEY_EDGE} strokeWidth="1" fill="none">
+      <g stroke={KEY_EDGE} strokeWidth="1" fill="none" aria-hidden="true">
         {[0, 1, 2, 3].map((i) => (
           <line
             key={`egt-leader-${i}`}
@@ -153,6 +190,7 @@ function Overlay() {
           width={88}
           label={`EGT ${i + 1}`}
           sources={ENGINE}
+          channel={`egt${i + 1}`}
           accent={i + 1 === FAULT_CYLINDER}
         >
           <LiveSpan select={(f) => fmt(f.egt_k[i] ?? Number.NaN, 0)} />
@@ -160,7 +198,7 @@ function Overlay() {
         </Callout>
       ))}
 
-      <Callout x={20} y={6} width={188} label="MAP · INTAKE PLENUM" sources={ENGINE}>
+      <Callout x={20} y={6} width={188} label="MAP · INTAKE PLENUM" sources={ENGINE} channel="map">
         <LiveSpan select={(f) => grouped(f.map_pa / 100)} />
         <Unit>hPa</Unit>
         <tspan fill="var(--foreground-dim)" fontSize="11" dx="10">
@@ -168,12 +206,19 @@ function Overlay() {
         </tspan>
       </Callout>
 
-      <Callout x={920} y={20} width={188} label="TURBO SPEED" sources={AUX}>
+      <Callout x={920} y={20} width={188} label="TURBO SPEED" sources={AUX} channel="tc_rpm">
         <LiveSpan select={(f) => grouped(f.tc_rpm)} />
         <Unit>rpm</Unit>
       </Callout>
 
-      <Callout x={920} y={150} width={188} label="MAF · COMPRESSOR IN" sources={AUX_AND_ENGINE}>
+      <Callout
+        x={920}
+        y={150}
+        width={188}
+        label="MAF · COMPRESSOR IN"
+        sources={AUX_AND_ENGINE}
+        channel="maf"
+      >
         <LiveSpan select={(f) => fmt(f.maf_kgs, 3)} />
         <Unit>kg/s</Unit>
         <tspan fill="var(--foreground-dim)" fontSize="11" dx="10">
@@ -181,7 +226,7 @@ function Overlay() {
         </tspan>
       </Callout>
 
-      <Callout x={120} y={480} width={188} label="OIL · SUMP" sources={ENGINE}>
+      <Callout x={120} y={480} width={188} label="OIL · SUMP" sources={ENGINE} channel="oil_p">
         <LiveSpan select={(f) => fmt(f.oil_p_pa / 1e5, 2)} />
         <Unit>bar</Unit>
         <tspan fill="var(--foreground-dim)" fontSize="11" dx="10">

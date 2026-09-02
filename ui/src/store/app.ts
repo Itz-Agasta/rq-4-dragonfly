@@ -38,7 +38,12 @@ export interface Alert {
  * empty state.
  */
 export interface Selection {
-  /** Channel id, e.g. `egt3`. */
+  /**
+   * Channel, as a registry id (`egt3`) or a compared-channel name (`EGT 3`).
+   *
+   * Both spellings are live because the two halves of the app name channels
+   * differently; `comparedIndex` in `store/compared.ts` accepts either.
+   */
   channel: string | null;
   /** Fault hypothesis id. */
   hypothesis: string | null;

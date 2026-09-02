@@ -23,6 +23,18 @@ export function fmt(value: number, dp = 0): string {
   return value.toFixed(dp).replace("-", MINUS);
 }
 
+/**
+ * Fixed-decimal value that always carries a sign character.
+ *
+ * The plus is what keeps a column of residuals aligned: without it a positive
+ * value is one glyph narrower than the negative above it and the decimal points
+ * stop lining up, which tabular figures alone do not fix.
+ */
+export function signed(value: number, dp = 0): string {
+  if (!Number.isFinite(value)) return NO_VALUE;
+  return value >= 0 ? `+${fmt(value, dp)}` : fmt(value, dp);
+}
+
 /** Thousands-grouped integer, for rpm and similar wide values. */
 export function grouped(value: number): string {
   if (!Number.isFinite(value)) return NO_VALUE;

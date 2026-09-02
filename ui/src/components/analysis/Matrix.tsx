@@ -13,10 +13,10 @@
 
 import { useRef } from "react";
 
-import type { Matrix as MatrixData } from "@/components/analysis/signatures";
 import { ramp, rampGradient, short, sign } from "@/components/analysis/signatures";
 import { fmt, NO_VALUE } from "@/lib/fmt";
 import { useLiveSink } from "@/lib/live";
+import type { Matrix as MatrixData } from "@/lib/signatures";
 import { isFresh } from "@/lib/telemetry";
 
 /**

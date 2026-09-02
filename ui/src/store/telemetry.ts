@@ -16,6 +16,7 @@ import { Ring } from "@/lib/ring";
 import type { Frame } from "@/lib/telemetry";
 import { CHANNELS, RECORDED } from "@/store/frame";
 import { ThetaHistory } from "@/store/theta";
+import { TwinHistory } from "@/store/twin";
 
 /** Window held for the streaming strips, seconds. */
 export const HISTORY_SECONDS = 90;
@@ -51,12 +52,24 @@ class TelemetryStore {
    */
   readonly theta = new ThetaHistory();
 
+  /**
+   * Measurement, prediction and residual per compared channel, at the frame
+   * rate over the same window as the strips.
+   *
+   * Kept beside the strips rather than inside the TWIN screen for the reason the
+   * theta history is: a screen that allocates its own window starts it again
+   * every time it is navigated to, and the one thing an operator does after
+   * seeing a divergence on OPS is come here to look at it.
+   */
+  readonly twin = new TwinHistory(CAPACITY);
+
   /** Most recent frame, or null before the first one arrives. */
   latest: Frame | null = null;
 
   push(frame: Frame): void {
     this.latest = frame;
     this.theta.push(frame);
+    this.twin.push(frame);
     this.time.push(Number.isFinite(frame.t_s) ? frame.t_s : 0);
 
     for (const id of RECORDED) {
