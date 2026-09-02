@@ -13,6 +13,7 @@ import { NavRail } from "@/components/app/NavRail";
 import { TopBar } from "@/components/app/TopBar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { pollHealth } from "@/lib/health";
+import { report } from "@/lib/report";
 import { connect } from "@/lib/telemetry";
 import { type ScreenId, useApp } from "@/store/app";
 import { telemetry } from "@/store/telemetry";
@@ -35,6 +36,10 @@ export function Shell() {
     const connection = connect({
       onFrame: (frame) => telemetry.push(frame),
       onState: setSocket,
+      // Without this a throw anywhere in the store is swallowed by the socket's
+      // own guard and the whole app sits at its placeholders looking like a dead
+      // feed. `connect` documents the hazard and nothing was listening.
+      onDecodeError: (error) => report("frame dropped", error),
     });
     const stopPolling = pollHealth(setHealth);
     return () => {

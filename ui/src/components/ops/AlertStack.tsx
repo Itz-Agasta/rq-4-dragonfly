@@ -1,18 +1,23 @@
 /**
  * The alert stack.
  *
- * MOCK: entries come from `./data`. Acknowledgement is real state, held in the
- * app store, because the navigation rail reads it to decide whether a screen
- * carries an unacknowledged alert.
+ * Entries are derived from the telemetry in `store/events`, not authored, and
+ * acknowledgement is real state held in the app store because the navigation
+ * rail reads it to decide whether a screen carries an unacknowledged alert.
+ *
+ * The list is pushed into React state only when the log's version changes, which
+ * is at human rates: an event is raised when a detector fires or a residual
+ * holds outside its band for two seconds, not on every frame.
  */
 
-import { useEffect } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
-import { ALERTS, PRE_ACKED } from "@/components/ops/data";
 import { Button } from "@/components/ui/button";
 import { missionClock } from "@/lib/fmt";
+import { useLiveSink } from "@/lib/live";
 import { type Alert, useApp } from "@/store/app";
+import { telemetry } from "@/store/telemetry";
 
 function Row({ alert, acked }: { alert: Alert; acked: boolean }) {
   const acknowledge = useApp((s) => s.acknowledge);
@@ -59,8 +64,11 @@ function Row({ alert, acked }: { alert: Alert; acked: boolean }) {
             variant="ghost"
             // Screens are drill-downs: this arrives at ANALYSIS with the
             // hypothesis already open rather than at a default empty state.
+            // Screens are drill-downs, and the selection is the event's own
+            // channel rather than a constant: an alert about LAMBDA 3 that
+            // opened TWIN on EGT 3 would be worse than no link at all.
             onClick={() => {
-              select({ channel: "egt3", hypothesis: "injector-coking", t_s: alert.t_s });
+              select({ channel: alert.subsystem, t_s: alert.t_s });
               void navigate(`/${alert.screen}`);
             }}
           >
@@ -74,14 +82,18 @@ function Row({ alert, acked }: { alert: Alert; acked: boolean }) {
 
 export function AlertStack() {
   const setAlerts = useApp((s) => s.setAlerts);
-  const acknowledge = useApp((s) => s.acknowledge);
   const acked = useApp((s) => s.acked);
   const alerts = useApp((s) => s.alerts);
+  const [empty, setEmpty] = useState(true);
+  const seen = useRef(-1);
 
-  useEffect(() => {
-    setAlerts([...ALERTS]);
-    for (const id of PRE_ACKED) acknowledge(id);
-  }, [setAlerts, acknowledge]);
+  useLiveSink(() => {
+    const log = telemetry.events;
+    if (log.version === seen.current) return;
+    seen.current = log.version;
+    setAlerts(log.list());
+    setEmpty(log.list().length === 0);
+  });
 
   const unacked = alerts.filter((a) => !acked.has(a.id)).length;
 
@@ -94,8 +106,11 @@ export function AlertStack() {
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {alerts.length === 0 ? (
-          <div className="label-micro p-4">No active alerts</div>
+        {empty ? (
+          // Not "no alerts": on a healthy engine this is the normal state and it
+          // is a finding, since the whole claim is that a fault is caught here
+          // before anything conventional fires.
+          <div className="label-micro p-4">Nothing raised this mission</div>
         ) : (
           alerts.map((a) => <Row key={a.id} alert={a} acked={acked.has(a.id)} />)
         )}
