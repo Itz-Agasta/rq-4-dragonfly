@@ -106,17 +106,9 @@ export function Advisory() {
     }
   });
 
-  // `shrink-0` and no grow, so this panel is the same height whatever the alert
-  // stack is doing. It was `flex-1`, which is `flex: 1 1 0%`, and a zero basis
-  // means a panel that only ever receives *positive* slack: once the stack
-  // overflowed the column there was none, the panel was allotted its zero basis
-  // and the whole advisory left the screen, measured at ten alerts. Growing from
-  // a content basis fixed that and was still wrong, because the panel then
-  // stretched to 400px on a quiet engine and `justify-between` spread three
-  // fields over 100px gaps. An operator learns the shape of this panel and reads
-  // it from across the room; a payload that changes size with the length of the
-  // log beside it is the thing to avoid. The log owns the variable space and
-  // scrolls, which is what a log is for.
+  // `shrink-0` and no grow, never `flex-1`: a zero basis receives only positive
+  // slack, so an overflowing alert stack left this panel at zero height. Constant
+  // height whatever the log does; the log takes the slack and scrolls.
   return (
     <section className="marks relative flex shrink-0 flex-col overflow-hidden">
       <div className="border-border flex h-9 shrink-0 items-center justify-between border-b px-4">

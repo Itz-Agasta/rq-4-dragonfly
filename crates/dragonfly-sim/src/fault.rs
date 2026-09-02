@@ -29,23 +29,17 @@ use engine_model::{CYLINDERS, EngineParams};
 /// Shape constant for the growth curve. Three time constants reaches 95%.
 const DECAY: f64 = 3.0;
 
-/// Injector flow scale a coking fault may settle at, as a fraction of nominal.
-///
-/// Below 1.0 or the nozzle passes as much fuel as it was asked for and the fault
-/// is inert; not negative or it passes fuel backwards. The range is a constant
-/// rather than a literal in each check because the command line and the bus are
-/// two entry points into the same fault set and a range that drifted between
-/// them would let one of them build an engine the other rejects.
+// Named rather than repeated as literals: the command line and the bus are two
+// entry points into one fault set, and a range that drifted between them would
+// let one build an engine the other rejects. Both exclude zero separately.
+
+/// Injector flow scale coking may settle at, as a fraction of nominal.
 const COKING_SCALE: std::ops::Range<f64> = 0.0..1.0;
 
-/// Fraction of firings a misfire may fail, exclusive of zero.
-///
-/// Zero is a healthy cylinder and injecting it publishes a healthy engine on a
-/// run that says a fault was injected, which is the silent failure the checks
-/// exist for.
+/// Fraction of firings a misfire may fail.
 const MISFIRE_RATE: std::ops::RangeInclusive<f64> = 0.0..=1.0;
 
-/// Radiator effectiveness a fouling fault may settle at, as a fraction of clean.
+/// Radiator effectiveness fouling may settle at, as a fraction of clean.
 const COOLING_SCALE: std::ops::Range<f64> = 0.0..1.0;
 
 /// Severity at a given simulated time, 0 before the onset and 1 at the end of the
@@ -308,19 +302,14 @@ impl Faults {
     /// ramp runs from there. That is the difference from the command line
     /// arguments, which schedule a fault at a time chosen before the run starts.
     ///
-    /// Returns the reason a command was rejected, and applies nothing when it is.
-    /// A kind this build does not know is one of them, so an older simulator
-    /// talking to a newer ground station leaves the engine alone rather than
-    /// guessing.
+    /// `&'static str` and not a `thiserror` enum: the one caller logs the reason
+    /// and has no other move to make, so variants would serve nothing.
     ///
-    /// **The bus is not trusted.** A severity arrives as a float16 that anything
-    /// on the interface can write, and it is checked against the same ranges the
-    /// command line is checked against, for the same reason: a non-finite one
-    /// propagates through the state integration until every channel published is
-    /// NaN, and an out of range one degrades a parameter past what the fault
-    /// physically does. The command line reports these to a person and exits;
-    /// here there is nobody to exit for, so the command is dropped and the engine
-    /// is left as it was.
+    /// Returns why a command was rejected, and applies nothing when it is. An
+    /// unknown kind is one, so an older simulator leaves the engine alone rather
+    /// than guessing. **The bus is not trusted**: a severity is a float16 anything
+    /// on the interface can write, and a non-finite one propagates through the
+    /// integration until every published channel is NaN.
     ///
     /// A commanded fault **replaces** the one of its kind rather than composing
     /// with it. Two coking faults on one cylinder would otherwise ramp from two

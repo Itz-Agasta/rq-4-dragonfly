@@ -57,17 +57,10 @@ const CLEAR_SIGMA = 2.5;
 /**
  * Seconds a residual must stay back inside `CLEAR_SIGMA` before its episode ends.
  *
- * A dead band on its own is not enough and the demonstration fault proves it: as
- * the coking ramp deepens, EGT 3 crosses three sigma, dips back under 2.5 for a
- * few frames on noise, and crosses again, and the stack fills with `EGT 3
- * residual -3.10σ` and `EGT 3 residual -7.67σ` for one excursion that never
- * ended. Measured at eight alerts from four channels on one ramp, which pushed
- * the advisory panel off the screen.
- *
- * Ten seconds because the residual noise here is white at the publish rate, so a
- * dip is sub-second and two orders below this, while a channel that has genuinely
- * come back stays back. It is the same argument as `SUSTAIN_S` on the way in,
- * which is why the entry and exit are symmetric in shape if not in duration.
+ * A 0.5 sigma dead band alone is not hysteresis at unit-variance noise: a
+ * deepening ramp dips back inside for a few frames and raises the same channel
+ * twice for one excursion. Ten seconds because the noise is white at the publish
+ * rate, so a dip is sub-second, while a channel that has come back stays back.
  */
 const CLEAR_S = 10;
 
@@ -185,14 +178,10 @@ export class EventLog {
   /**
    * The twin losing its estimate, which is not an engine fault but is a caveat.
    *
-   * An edge, like the link rule above it, and it has to be: an event id is its
-   * source and its rounded mission time, so a latch that never cleared would
-   * raise a fresh "lost lock" every second for as long as the outage lasted and
-   * bury the alert that explains it.
-   *
-   * A stale frame updates nothing. Its twin is absent rather than unlocked, so
-   * reading it as unlocked would clear the latch during the outage and then say
-   * nothing when the feed comes back with an estimate that has genuinely gone.
+   * An edge, like the link rule, and it has to be: an id is its source and its
+   * rounded mission time, so a latch that never cleared raises a fresh alert every
+   * second of an outage. A stale frame updates nothing, because its twin is absent
+   * rather than unlocked and clearing the latch there loses the real transition.
    */
   private lock(frame: Frame): void {
     if (!isFresh(frame.ages.engine_ms)) return;
@@ -216,10 +205,8 @@ export class EventLog {
       const magnitude = Math.abs(sigma);
       const episode = this.episodes.get(i) ?? { since: null, raised: false, returned: null };
 
-      // Anywhere at or above the clear threshold restarts the dwell, including the
-      // dead band between the two. A residual that fell back, then settled at 2.7
-      // sigma, has not come back at all, and counting the dwell through that would
-      // close the episode on a channel still sitting outside tolerance.
+      // Restarted anywhere at or above the threshold, the dead band included: a
+      // residual that fell back and settled at 2.7 sigma has not come back at all.
       if (magnitude >= CLEAR_SIGMA) episode.returned = null;
 
       if (magnitude > BAND_SIGMA) {

@@ -157,11 +157,12 @@ async fn ingest_loop(
                 )
                 .await
                 {
+                    link.down();
                     tracing::warn!(%error, "CAN read failed, reopening");
                 }
             }
             Err(error) => {
-                link.record(0, false, false);
+                link.down();
                 tracing::warn!(%error, iface = %iface, "cannot open interface, is `just can` done?");
             }
         }
@@ -190,11 +191,9 @@ async fn pump(
     let mut logged = Instant::now();
     let mut transfer_ids = dronecan_ice::TransferIdMap::new();
 
-    // Anything queued before this socket existed was aimed at a bus that has
-    // since gone away, and the press that queued it is seconds or minutes old.
-    // Sending it now would inject a fault nobody is expecting at a moment nobody
-    // chose. The handler refuses while the link is down, so this only catches the
-    // press that raced the drop.
+    // Anything queued before this socket existed was aimed at a bus that has since
+    // gone away, so sending it now injects a fault at a moment nobody chose. The
+    // handler refuses while the link is down; this catches the press that raced it.
     while let Ok(stale) = commands.try_recv() {
         tracing::warn!(
             sequence = stale.sequence,

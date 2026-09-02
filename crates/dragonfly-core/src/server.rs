@@ -53,6 +53,18 @@ impl LinkStatus {
         self.link_ok.store(link_ok, Ordering::Relaxed);
         self.twin_locked.store(twin_locked, Ordering::Relaxed);
     }
+
+    /// Record that there is no socket on the bus.
+    ///
+    /// **Every path that leaves the pump calls this**, including one about to
+    /// reopen at once: `POST /api/fault` reads `link_ok` to decide whether a
+    /// command has anywhere to go, and a link latched true through a reconnect
+    /// accepts a fault the next pump discards. The sequence number is left alone
+    /// because it is history, and a dropped link does not un-see its frames.
+    pub fn down(&self) {
+        self.link_ok.store(false, Ordering::Relaxed);
+        self.twin_locked.store(false, Ordering::Relaxed);
+    }
 }
 
 /// Shared state every handler sees.
@@ -77,10 +89,8 @@ pub struct AppState {
     /// way the command is queued and whichever socket is current sends it.
     ///
     /// Bounded and small: commands are pressed by a person, so nothing legitimate
-    /// fills it. **Space in the queue is not a route to the bus**, because the
-    /// ingest loop only drains it while its socket is open; the handler consults
-    /// `link` for that, and the loop throws away anything it finds queued when a
-    /// socket is reopened.
+    /// fills it. **Space in the queue is not a route to the bus**, since the
+    /// ingest loop drains it only while its socket is open. See [`LinkStatus::down`].
     pub commands: mpsc::Sender<FaultCommand>,
 }
 
@@ -225,14 +235,9 @@ async fn fault(
     State(state): State<AppState>,
     Json(request): Json<FaultRequest>,
 ) -> impl IntoResponse {
-    // The queue is drained by the ingest loop only while its socket is open, so
-    // with the bus down there is room for eight commands that would all land at
-    // once whenever it comes back: `try_send` succeeding says the queue has
-    // space, never that anything is listening. `link_ok` is the same flag the
-    // screen greys itself out on, and it covers both halves of having no route,
-    // an interface that will not open and an engine that has fallen silent.
-    // Checked before a sequence number is spent, so a refused press does not
-    // leave a gap in the numbering the simulator de-duplicates on.
+    // `try_send` succeeding says the queue has space, never that anything is
+    // listening, so with the bus down eight commands queue and all land when it
+    // returns. Checked before a sequence is spent: the simulator de-duplicates on it.
     if !state.link.link_ok.load(Ordering::Relaxed) {
         return (StatusCode::SERVICE_UNAVAILABLE, "no route to the bus").into_response();
     }

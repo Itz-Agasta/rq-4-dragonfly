@@ -207,19 +207,11 @@ async fn main() -> Result<()> {
 
 /// Turn one CAN frame into a fault command, or nothing.
 ///
-/// Everything the simulator publishes also arrives here on a virtual bus with
-/// other listeners, so the filter is deliberately narrow: the source node has to
-/// be the ground station, the data type ID has to match, the transfer has to
-/// reassemble, and its CRC has to check against this message's signature.
-/// Anything else is somebody else's traffic.
-///
-/// The source node is checked because a data type ID is not an identity. Any
-/// participant on a shared interface can publish this ID, and a command is the
-/// one message here that changes the machine rather than describing it. It is a
-/// filter and not a security control: DroneCAN authenticates nothing, so a node
-/// that lies about its ID passes. What it does buy is that the only traffic that
-/// can move the engine is traffic addressed the way the ground station addresses
-/// it, which on this bus makes a stray publisher inert instead of destructive.
+/// Everything the simulator publishes also arrives here, so the filter is narrow:
+/// ground station source node, matching data type ID, reassembled transfer, CRC
+/// against this message's signature. **A data type ID is not an identity** and
+/// this is the one message that changes the machine. Not a security control,
+/// since DroneCAN authenticates nothing, but a stray publisher stays inert.
 fn decode_command(
     inbound: &mut Reassembler,
     frame: &socketcan::CanFrame,

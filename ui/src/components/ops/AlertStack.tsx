@@ -10,7 +10,7 @@
  * holds outside its band for two seconds, not on every frame.
  */
 
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { useNavigate } from "react-router";
 
 import { Button } from "@/components/ui/button";
@@ -84,7 +84,6 @@ export function AlertStack() {
   const setAlerts = useApp((s) => s.setAlerts);
   const acked = useApp((s) => s.acked);
   const alerts = useApp((s) => s.alerts);
-  const [empty, setEmpty] = useState(true);
   const seen = useRef(-1);
 
   useLiveSink(() => {
@@ -92,7 +91,6 @@ export function AlertStack() {
     if (log.version === seen.current) return;
     seen.current = log.version;
     setAlerts(log.list());
-    setEmpty(log.list().length === 0);
   });
 
   const unacked = alerts.filter((a) => !acked.has(a.id)).length;
@@ -106,7 +104,7 @@ export function AlertStack() {
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {empty ? (
+        {alerts.length === 0 ? (
           // Not "no alerts": on a healthy engine this is the normal state and it
           // is a finding, since the whole claim is that a fault is caught here
           // before anything conventional fires.

@@ -267,32 +267,14 @@ impl Health {
         ((d.nominal - self.values[i]) / span).max(0.0)
     }
 
-    /// One parameter, held inside the range the physics is defined over.
-    ///
-    /// The filter clamps its **mean** to these bounds after every update, and that
-    /// is not enough on its own: a sigma point is the mean plus a column of the
-    /// covariance root, so an inflated covariance puts points far outside them and
-    /// **every sigma point is propagated through the engine model**. A step fault
-    /// commanded from the ground station drove `eta_vol` to -15228 on one such
-    /// point, which makes `eta_vol_max` negative, and `engine_model` clamps
-    /// volumetric efficiency into `0.0 ..= eta_vol_max` and panics on an inverted
-    /// range. That took the core's whole ingest task down with it.
-    ///
-    /// This is the sigma point projection of a constrained UKF rather than a patch
-    /// on a panic: the estimate is constrained where it becomes physics, the
-    /// covariance is left alone so the filter's own uncertainty stays honest, and
-    /// `engine_model` keeps its precondition instead of being taught to accept an
-    /// engine that cannot exist.
-    ///
-    /// Simon, "Kalman filtering with state constraints: a survey of linear and
-    /// nonlinear algorithms", IET Control Theory Appl. 4(8), 2010, sec. 4.
-    /// <https://doi.org/10.1049/iet-cta.2009.0032>
+    // Sigma point projection of a constrained UKF. Clamping the mean is not
+    // enough: a sigma point is the mean plus a column of the covariance root, and
+    // every one is propagated through a model that panics on a negative bound.
+    // Simon, IET Control Theory Appl. 4(8), 2010, sec. 4
+    // <https://doi.org/10.1049/iet-cta.2009.0032>
     fn bounded(&self, i: usize) -> f64 {
         let d = &DESCRIPTORS[i];
-        // A non-finite point cannot be clamped into the range, and it would reach
-        // the same clamp as a NaN bound and panic there instead. The filter's own
-        // factorisation rejects a diverged covariance on the next step, so this
-        // only has to keep the physics evaluable until it does.
+        // NaN survives `clamp` and panics at the next one, on a NaN bound.
         if !self.values[i].is_finite() {
             return d.nominal;
         }
@@ -303,9 +285,8 @@ impl Health {
     ///
     /// The base parameters are the engine as it was fitted when new; the result is
     /// the engine as the filter currently believes it to be. Every sigma point is
-    /// propagated through its own copy of this, which is why it takes a reference
-    /// and returns an owned value rather than mutating in place, and why every
-    /// parameter goes through [`Health::bounded`] on the way.
+    /// propagated through its own copy of this, which is why it takes a reference,
+    /// returns an owned value, and bounds every parameter on the way.
     #[must_use]
     pub fn apply(&self, base: &EngineParams) -> EngineParams {
         let mut p = base.clone();
