@@ -5,10 +5,16 @@
  * opens; the playhead is hot and moves at 500x, so it stays out of React. One
  * array, referenced by both.
  *
- * The events come from `store/events.ts` run over the recorded frames, which
- * yields the same alerts with the same ids the live screen produced. A recorded
- * frame carries zero source ages, which read as fresh, so the freshness gates
- * inside those rules pass rather than suppressing every event.
+ * The events come from `store/events.ts` run over the recorded frames, so there
+ * is one implementation of the rules rather than two. A recorded frame carries
+ * zero source ages, which read as fresh, so the freshness gates inside those
+ * rules pass rather than suppressing every event.
+ *
+ * **They are derived at the overview sampling, not at 20 Hz.** The redline and
+ * drift rules are exact regardless, because both read a mission time the core
+ * latched and put in every frame after it. The residual, link and lock rules
+ * stamp `frame.t_s`, so they quantise to the sample period and cannot see an
+ * excursion that no sample lands inside. The panel states the basis.
  */
 
 import { create } from "zustand";

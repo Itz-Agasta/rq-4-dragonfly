@@ -11,7 +11,7 @@ import { useEffect, useRef } from "react";
 
 import { fmt, missionClock, NO_VALUE } from "@/lib/fmt";
 import { subscribe } from "@/lib/live";
-import { bytesLabel } from "@/lib/mission";
+import { bytesLabel, OVERVIEW_STRIDE, rateHz } from "@/lib/mission";
 import { session, useReplay } from "@/store/replay";
 
 export function EventLog() {
@@ -19,6 +19,9 @@ export function EventLog() {
   const report = useReplay((s) => s.report);
   const info = useReplay((s) => s.info);
   const rows = useRef(new Map<string, HTMLButtonElement>());
+  // Taken from the recording's own frame count rather than assumed, so a
+  // recording made at another rate states that rate.
+  const basis = info ? (rateHz(info) / OVERVIEW_STRIDE).toFixed(1) : "";
 
   // The active row follows the playhead, which moves at 500x. Toggled as an
   // attribute from the render loop rather than as React state for the reason
@@ -46,7 +49,12 @@ export function EventLog() {
     <div className="border-border flex w-[300px] shrink-0 flex-col overflow-hidden border-l">
       <div className="border-border flex h-9 shrink-0 items-center justify-between border-b px-4">
         <span className="t-section">MISSION EVENTS</span>
-        <span className="label-micro num">{events.length}</span>
+        {/* The rate is part of the count. These are re-derived from the overview
+            pass, so an excursion no sample lands inside is not in this number. */}
+        <span className="label-micro num">
+          {events.length}
+          {basis ? ` · ${basis} Hz` : ""}
+        </span>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">

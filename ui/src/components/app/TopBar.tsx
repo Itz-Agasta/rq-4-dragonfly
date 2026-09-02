@@ -10,7 +10,6 @@
 
 import { fmt, missionClock, NO_VALUE } from "@/lib/fmt";
 import { Live } from "@/lib/live";
-import { bytesLabel, rateHz } from "@/lib/mission";
 import { isFresh } from "@/lib/telemetry";
 import { linkIsUp, twinIsLocked, useApp } from "@/store/app";
 import { channel } from "@/store/frame";
@@ -44,9 +43,13 @@ export function TopBar({ screen }: { screen: string }) {
   const socket = useApp((s) => s.socket);
   const locked = useApp(twinIsLocked);
   const mission = useReplay((s) => (s.status === "ready" ? s.info : null));
+  const loaded = useReplay((s) => s.frames.length);
+  // Frames loaded against frames recorded, rather than the recording's 20 Hz.
+  // The screen reads an overview pass and a rate here reads as the rate it is
+  // drawing at.
   const replay =
     screen === "REPLAY" && mission
-      ? `${mission.id}  ${bytesLabel(mission.bytes)} · ${rateHz(mission)} Hz`
+      ? `${mission.id}  ${loaded.toLocaleString("en-US")} of ${mission.frames.toLocaleString("en-US")} frames`
       : "";
 
   return (

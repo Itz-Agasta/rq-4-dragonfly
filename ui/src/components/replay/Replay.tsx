@@ -28,15 +28,22 @@ export function Replay() {
   const open = useReplay((s) => s.open);
 
   // Every readout in the app, the mission bar included, follows the playhead
-  // while this screen is mounted. Restored on the way out or the whole app
+  // while a recording is loaded. Restored on the way out or the whole app
   // freezes at the last recorded frame.
+  //
+  // Gated on `ready`, not on mount: the render loop skips its sinks when the
+  // source has no frame, so installing one that returns null leaves the mission
+  // bar holding the live values it last painted, with no staleness to dim them.
+  // Arriving from OPS that is 300 ms of frozen telemetry reading as current, and
+  // on a core with no recordings it is indefinite.
   useEffect(() => {
+    if (status !== "ready") return;
     setFrameSource(() => session.frame());
     return () => {
       setFrameSource(null);
       session.stop();
     };
-  }, []);
+  }, [status]);
 
   useEffect(() => {
     let cancelled = false;
