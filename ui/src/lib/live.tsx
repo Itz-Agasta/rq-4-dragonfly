@@ -52,6 +52,23 @@ const readouts = new Set<Sink>();
 let handle = 0;
 let lastReadout = 0;
 
+const liveSource = (): Frame | null => telemetry.latest;
+
+let source: () => Frame | null = liveSource;
+
+/**
+ * Drive the loop from something other than the live feed.
+ *
+ * REPLAY sets this to the frame under its playhead, which is what makes the
+ * mission bar and every readout on that screen show the recording rather than
+ * the bus without a second set of components. Restore it on unmount: a screen
+ * that leaves a dead source installed freezes every readout in the app at
+ * whatever it last painted, which is indistinguishable from a dead feed.
+ */
+export function setFrameSource(next: (() => Frame | null) | null): void {
+  source = next ?? liveSource;
+}
+
 /**
  * Run one sink, and drop it if it throws.
  *
@@ -75,7 +92,7 @@ function run(sink: Sink, frame: Frame, from: Set<Sink>): void {
 }
 
 function tick(now: number): void {
-  const frame = telemetry.latest;
+  const frame = source();
   if (frame) {
     // Iterated directly rather than over a copy. `run` may delete the sink it is
     // running, and a Set's iterator tolerates the current entry being removed.

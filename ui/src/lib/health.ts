@@ -16,6 +16,16 @@ export interface Health {
   twin_locked: boolean;
 }
 
+/**
+ * Subsystem index below which a subsystem is degraded rather than noisy.
+ *
+ * Eighty, because a hard transient drags an index into the high eighties on a
+ * healthy engine and a threshold has to clear that as well as the settled value.
+ * Shared by the OPS health rail and the REPLAY timeline so one mission cannot be
+ * degraded on one screen and nominal on the other.
+ */
+export const DEGRADED_BELOW = 80;
+
 /** How often to ask. Slow: this is a status light, not telemetry. */
 const POLL_MS = 2000;
 
