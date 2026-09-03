@@ -14,7 +14,8 @@
 
 import { useRef } from "react";
 
-import { fmt, NO_VALUE } from "@/lib/fmt";
+import { fmt, NO_VALUE, posteriorPct } from "@/lib/fmt";
+import { DEGRADED_BELOW } from "@/lib/health";
 import { useLiveSink } from "@/lib/live";
 import type { Matrix } from "@/lib/signatures";
 import { isFresh, SUBSYSTEMS } from "@/lib/telemetry";
@@ -62,7 +63,7 @@ export function Hypotheses({ data }: { data: Matrix }) {
     const best = diagnosis.best;
     const posterior = diagnosis.posterior[best] ?? 0;
     if (headline.current) headline.current.textContent = data.hypotheses[best];
-    if (percent.current) percent.current.textContent = `${fmt(posterior * 100, 1)}%`;
+    if (percent.current) percent.current.textContent = `${posteriorPct(posterior)}%`;
     if (bar.current) bar.current.style.width = `${Math.round(posterior * 100)}%`;
     if (kind.current) {
       kind.current.textContent = data.instrument[best]
@@ -152,7 +153,11 @@ export function Hypotheses({ data }: { data: Matrix }) {
       const agrees = worst >= 0 && data.subsystem[best] === worst;
       spentNote.current.textContent =
         best === 0
-          ? "nothing spent; every parameter is at nominal"
+          ? // The lowest index prints immediately above this note, so claiming
+            // every parameter is nominal contradicts it on the same panel.
+            lowest < DEGRADED_BELOW
+            ? "spent with no fault named: the residual fits no signature in the library"
+            : "nothing spent; every parameter is at nominal"
           : // An instrument fault can never legitimately agree, whatever the
             // subsystem column says. The engine is serviceable and the reading
             // is not, so an index that has fallen is the filter bending a real

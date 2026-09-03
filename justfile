@@ -68,8 +68,18 @@ build-ui:
 # document nobody opens at demo time.
 
 # the demo path: build the frontend, then full-screen it against the core
+#
+# a throwaway profile rather than the developer's own: the everyday one brings a
+# "restore pages?" bubble, extensions and a bookmark bar to a fullscreen
+# demonstration, and the bubble has to be dismissed in front of the room. delete
+# the directory to reset the browser to first-run.
+#
+# it does not quieten the console and is not meant to. chromium's own
+# DEPRECATED_ENDPOINT and wayland/vulkan lines appear on a clean profile too, and
+# neither is this application: measured 59.4 fps on this bundle with both present.
 kiosk: build-ui
-    chromium --app=http://127.0.0.1:8787 --start-fullscreen
+    chromium --app=http://127.0.0.1:8787 --start-fullscreen \
+        --user-data-dir=/tmp/dragonfly-kiosk
 
 # prove frames are actually on the wire. the D5 acceptance test.
 candump:

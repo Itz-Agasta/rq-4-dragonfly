@@ -164,6 +164,12 @@ impl Default for Tuning {
 pub struct TwinOutput {
     /// Whether the residual has been small enough for long enough to be trusted.
     pub locked: bool,
+    /// Whether lock has ever been held this mission. Latches true, never clears.
+    ///
+    /// A client attaching mid-mission cannot otherwise tell a twin still
+    /// converging from one that held an estimate and lost it, because the edge
+    /// between them may predate its socket. The two want opposite things said.
+    pub ever_locked: bool,
     /// Root mean square residual across channels, percent of their references.
     pub rms_pct: f64,
     /// How hard the engine is being transiented, 0 at steady state.
@@ -330,7 +336,11 @@ impl Twin {
                 self.locked_since = None;
                 self.transient = 0.0;
                 self.quality.clear();
+                // The latch outlives the reset: a filter that failed after
+                // holding an estimate is the case `ever_locked` exists to report.
+                let held = self.output.ever_locked;
                 self.output = blank_output();
+                self.output.ever_locked = held;
                 Err(e)
             }
         }
@@ -577,6 +587,7 @@ impl Twin {
             self.locked_since = None;
             self.output.locked = false;
         }
+        self.output.ever_locked |= self.output.locked;
     }
 }
 
@@ -676,6 +687,7 @@ fn pack(x: &mut DVector<f64>, state: &State) {
 fn blank_output() -> TwinOutput {
     TwinOutput {
         locked: false,
+        ever_locked: false,
         rms_pct: f64::NAN,
         transient: 0.0,
         predicted: [f64::NAN; CHANNELS],

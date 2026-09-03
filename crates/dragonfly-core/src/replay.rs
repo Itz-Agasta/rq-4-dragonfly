@@ -362,6 +362,10 @@ impl<'a> Columns<'a> {
 
         Some(TwinOutput {
             locked: self.bool("twin_locked", row),
+            // No latch is stored, so a row reports only what that row knew. The
+            // event log replays a mission from its start and re-derives the edge,
+            // which is the only thing that reads this.
+            ever_locked: self.bool("twin_locked", row),
             rms_pct: self.f("rms_pct", row),
             transient: self.f("transient", row),
             predicted,

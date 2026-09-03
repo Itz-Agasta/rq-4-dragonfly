@@ -78,7 +78,7 @@ export class EventLog {
   private alerts: Alert[] = [];
   private episodes = new Map<number, Episode>();
   private linkWasOk = true;
-  private wasLocked = false;
+  private wasLocked: boolean | null = null;
   private lastT = Number.NEGATIVE_INFINITY;
 
   /**
@@ -120,7 +120,7 @@ export class EventLog {
     this.alerts = [];
     this.episodes.clear();
     this.linkWasOk = true;
-    this.wasLocked = false;
+    this.wasLocked = null;
     this.version += 1;
   }
 
@@ -186,7 +186,11 @@ export class EventLog {
   private lock(frame: Frame): void {
     if (!isFresh(frame.ages.engine_ms)) return;
     const locked = frame.twin?.locked === true;
-    if (this.wasLocked && !locked) {
+    // Seeded from the twin's latch, not `false`: a screen opened mid-outage never
+    // saw the edge, so it would raise no caveat and `residuals` would stay
+    // suppressed. A cold start has never locked, so it still raises nothing.
+    const wasLocked = this.wasLocked ?? frame.twin?.ever_locked === true;
+    if (wasLocked && !locked) {
       this.raise(
         event(frame.t_s, "advisory", "TWIN", "Twin lost lock, residuals unreliable", "twin"),
       );

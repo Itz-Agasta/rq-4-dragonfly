@@ -20,8 +20,8 @@
 
 import { useRef } from "react";
 
-import { TASKS } from "@/lib/advisory";
-import { fmt, missionClock, NO_VALUE } from "@/lib/fmt";
+import { degradedNote, TASKS } from "@/lib/advisory";
+import { fmt, missionClock, NO_VALUE, posteriorPct } from "@/lib/fmt";
 import { useLiveSink } from "@/lib/live";
 import { HYPOTHESES, isFresh, SUBSYSTEMS } from "@/lib/telemetry";
 const WAITING = "waiting for the twin";
@@ -62,7 +62,7 @@ export function Advisory() {
     if (confidence.current) {
       const posterior = diagnosed ? twin.diagnosis.posterior[twin.diagnosis.best] : undefined;
       confidence.current.textContent =
-        posterior === undefined ? "" : `confidence ${fmt(posterior * 100, 1)}%`;
+        posterior === undefined ? "" : `confidence ${posteriorPct(posterior)}%`;
     }
 
     // The limiting subsystem rather than the worst parameter: an operator is
@@ -87,10 +87,11 @@ export function Advisory() {
 
     const task = diagnosed ? TASKS[twin.diagnosis.best] : null;
     if (action.current) {
+      const degraded = diagnosed ? degradedNote(twin.health, twin.ever_locked) : null;
       action.current.textContent = task
         ? `${task.action} · ${task.duration}`
         : diagnosed
-          ? "No action, every parameter is at nominal"
+          ? (degraded ?? "No action, every parameter is at nominal")
           : WAITING;
     }
 

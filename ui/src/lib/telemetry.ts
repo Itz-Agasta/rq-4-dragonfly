@@ -87,6 +87,13 @@ export const SUBSYSTEM_INFERRED: readonly boolean[] = [true, true, true, true, t
 export interface TwinOutput {
   /** Whether the innovation has been small enough for long enough. */
   locked: boolean;
+  /**
+   * Whether lock has ever been held this mission. Latches true, never clears.
+   *
+   * A screen attaching mid-mission never saw the edge, so this is the only way
+   * it can tell a twin still converging from one that lost its estimate.
+   */
+  ever_locked: boolean;
   /** Root mean square residual against a healthy engine, percent. */
   rms_pct: number;
   /** Root mean square innovation, percent. How well the twin is tracking. */

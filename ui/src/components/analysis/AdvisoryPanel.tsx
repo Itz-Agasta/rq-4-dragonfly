@@ -13,7 +13,7 @@
 
 import { useRef } from "react";
 
-import { TASKS } from "@/lib/advisory";
+import { degradedNote, TASKS } from "@/lib/advisory";
 import { NO_VALUE } from "@/lib/fmt";
 import { useLiveSink } from "@/lib/live";
 import { isFresh } from "@/lib/telemetry";
@@ -36,10 +36,11 @@ export function AdvisoryPanel() {
     const task = diagnosed ? TASKS[twin.diagnosis.best] : null;
 
     if (action.current) {
+      const degraded = diagnosed ? degradedNote(twin.health, twin.ever_locked) : null;
       action.current.textContent = task
         ? task.action
         : diagnosed
-          ? "No action · every parameter is at nominal"
+          ? (degraded ?? "No action · every parameter is at nominal")
           : WAITING;
     }
     if (duration.current) duration.current.textContent = task?.duration ?? NO_VALUE;

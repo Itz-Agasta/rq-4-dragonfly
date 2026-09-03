@@ -16,6 +16,33 @@
  * nothing and a dry gallery damages everything.
  */
 
+import { fmt } from "@/lib/fmt";
+import { DEGRADED_BELOW } from "@/lib/health";
+import { SUBSYSTEMS } from "@/lib/telemetry";
+
+/**
+ * The caveat to print when the library names no fault but the rail disagrees.
+ *
+ * Null when the engine really is clean, so each panel keeps its own good-case
+ * wording. A nominal diagnosis is not a claim about the whole engine: an
+ * unlocked twin falls back to the nominal row while the indices still carry the
+ * degradation, and the panel would otherwise clear an aircraft reading 21.
+ *
+ * `everLocked` is not optional. Before the first lock every index reads zero,
+ * which is the absence of a score, and this would name a healthy subsystem.
+ */
+export function degradedNote(health: readonly number[], everLocked: boolean): string | null {
+  if (!everLocked) return null;
+  let worst = -1;
+  for (let i = 0; i < health.length; i += 1) {
+    const value = health[i];
+    if (value === undefined || !Number.isFinite(value) || value >= DEGRADED_BELOW) continue;
+    if (worst < 0 || value < (health[worst] ?? Number.POSITIVE_INFINITY)) worst = i;
+  }
+  if (worst < 0) return null;
+  return `No fault matches the residual · ${SUBSYSTEMS[worst]} at ${fmt(health[worst] ?? 0, 0)}`;
+}
+
 /** Rows are indexed by hypothesis, in `HYPOTHESES` order. */
 export interface Task {
   /** What to do, one line. */

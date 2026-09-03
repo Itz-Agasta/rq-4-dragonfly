@@ -24,6 +24,20 @@ export function fmt(value: number, dp = 0): string {
 }
 
 /**
+ * A posterior as a percentage, held short of certainty.
+ *
+ * The likelihood ratio saturates in f64 once one signature fits and the rest do
+ * not, so an uncapped panel prints `100.0%` for a posterior measured at
+ * 0.9999840984. Another decimal only moves the same problem to 99.99%. The `>`
+ * says the cap is doing the work, as it does for the CUSUM in `DetectionBar`.
+ */
+export function posteriorPct(posterior: number): string {
+  if (!Number.isFinite(posterior)) return NO_VALUE;
+  const percent = posterior * 100;
+  return percent >= 99.95 ? ">99.9" : fmt(percent, 1);
+}
+
+/**
  * Fixed-decimal value that always carries a sign character.
  *
  * The plus is what keeps a column of residuals aligned: without it a positive

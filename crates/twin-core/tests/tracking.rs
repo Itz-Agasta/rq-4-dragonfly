@@ -368,6 +368,41 @@ fn an_unusable_measurement_yields_no_estimate() {
     assert_eq!(twin.output().rms_pct, seeded, "nothing advanced");
 }
 
+/// The latch a screen joining mid-mission reads, and the reset it has to survive.
+#[test]
+fn ever_locked_latches_and_outlives_a_filter_reset() {
+    const DT: f64 = 0.05;
+    let c = Condition::cruise();
+    let mut twin = Twin::new(engine_model::engines::ae330());
+    assert!(
+        !twin.output().ever_locked,
+        "a twin that has never run has never locked"
+    );
+
+    let (locked, mut plant) = fly(&c, 60.0, &healthy());
+    assert!(
+        locked.output().locked && locked.output().ever_locked,
+        "flew but did not lock"
+    );
+
+    // Reaching the reset needs a measurement that passes `is_usable` and then
+    // breaks the filter. An unusable one returns `Ok(None)` and keeps the
+    // estimate, so absurd but finite values are the way through.
+    twin = locked;
+    let mut broken = plant.advance(&c, DT, &healthy());
+    broken.map_pa = 1e300;
+    broken.cht_k = [1e300; 4];
+    let _ = twin.update(&broken);
+    assert!(
+        twin.output().rms_pct.is_nan(),
+        "the reset did not happen, so this test proves nothing"
+    );
+    assert!(
+        twin.output().ever_locked,
+        "the latch was blanked by the reset, which is the case it exists to report"
+    );
+}
+
 /// A healthy engine must not be diagnosed. Every parameter staying within its own
 /// posterior of nominal is the statement that the filter is not inventing faults to
 /// explain its own modelling error.
