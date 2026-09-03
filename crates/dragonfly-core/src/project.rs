@@ -67,6 +67,12 @@ struct Track {
     /// The certified limit, where the channel has one. `None` means the channel is
     /// context: it is drawn to explain the ones that do, and nothing alarms on it.
     limit: fn(&Limits) -> Option<f64>,
+    /// The certified **lower** limit, for the one channel whose binding end is the
+    /// bottom. EASA TCDS E.200 publishes a minimum oil pressure of 2.5 bar at
+    /// maximum continuous alongside the 6.5 bar maximum, and a forecast that tests
+    /// only the top reports a full-power leg as clear while the engine spends
+    /// minutes under the floor.
+    floor: fn(&Limits) -> Option<f64>,
     /// Whether that limit is published or estimated.
     ///
     /// Carried rather than inferred from the channel name at the far end. A
@@ -88,6 +94,7 @@ const TRACK: &[Track] = &[
         unit: "rpm",
         pick: |s| s.state.rpm(),
         limit: |l| Some(l.rpm_max),
+        floor: |_| None,
         published: true,
     },
     Track {
@@ -95,6 +102,7 @@ const TRACK: &[Track] = &[
         unit: "hp",
         pick: |s| s.outputs.power_brake_w / 745.7,
         limit: |_| None,
+        floor: |_| None,
         published: false,
     },
     Track {
@@ -102,6 +110,7 @@ const TRACK: &[Track] = &[
         unit: "kPa",
         pick: |s| s.state.p_im / 1000.0,
         limit: |_| None,
+        floor: |_| None,
         published: false,
     },
     Track {
@@ -109,6 +118,7 @@ const TRACK: &[Track] = &[
         unit: "",
         pick: |s| s.outputs.lambda,
         limit: |_| None,
+        floor: |_| None,
         published: false,
     },
     Track {
@@ -116,6 +126,7 @@ const TRACK: &[Track] = &[
         unit: "kg/h",
         pick: |s| s.outputs.w_fuel * 3600.0,
         limit: |_| None,
+        floor: |_| None,
         published: false,
     },
     Track {
@@ -123,6 +134,7 @@ const TRACK: &[Track] = &[
         unit: "K",
         pick: |s| s.state.t_oil,
         limit: |l| Some(l.redline.oil_t_max_k),
+        floor: |_| None,
         published: true,
     },
     Track {
@@ -130,6 +142,7 @@ const TRACK: &[Track] = &[
         unit: "bar",
         pick: |s| s.outputs.p_oil / 1e5,
         limit: |l| Some(l.redline.oil_p_max_pa / 1e5),
+        floor: |l| Some(l.redline.oil_p_min_pa / 1e5),
         published: true,
     },
     Track {
@@ -137,6 +150,7 @@ const TRACK: &[Track] = &[
         unit: "K",
         pick: |s| s.state.t_coolant,
         limit: |l| Some(l.redline.coolant_t_max_k),
+        floor: |_| None,
         published: true,
     },
     Track {
@@ -144,6 +158,7 @@ const TRACK: &[Track] = &[
         unit: "K",
         pick: |s| s.outputs.t_egt[0],
         limit: |l| Some(l.redline.egt_max_k),
+        floor: |_| None,
         published: false,
     },
     Track {
@@ -151,6 +166,7 @@ const TRACK: &[Track] = &[
         unit: "K",
         pick: |s| s.outputs.t_egt[1],
         limit: |l| Some(l.redline.egt_max_k),
+        floor: |_| None,
         published: false,
     },
     Track {
@@ -158,6 +174,7 @@ const TRACK: &[Track] = &[
         unit: "K",
         pick: |s| s.outputs.t_egt[2],
         limit: |l| Some(l.redline.egt_max_k),
+        floor: |_| None,
         published: false,
     },
     Track {
@@ -165,6 +182,7 @@ const TRACK: &[Track] = &[
         unit: "K",
         pick: |s| s.outputs.t_egt[3],
         limit: |l| Some(l.redline.egt_max_k),
+        floor: |_| None,
         published: false,
     },
     Track {
@@ -172,6 +190,7 @@ const TRACK: &[Track] = &[
         unit: "K",
         pick: |s| s.state.t_cht[0],
         limit: |l| Some(l.redline.cht_max_k),
+        floor: |_| None,
         published: false,
     },
     Track {
@@ -179,6 +198,7 @@ const TRACK: &[Track] = &[
         unit: "K",
         pick: |s| s.state.t_cht[1],
         limit: |l| Some(l.redline.cht_max_k),
+        floor: |_| None,
         published: false,
     },
     Track {
@@ -186,6 +206,7 @@ const TRACK: &[Track] = &[
         unit: "K",
         pick: |s| s.state.t_cht[2],
         limit: |l| Some(l.redline.cht_max_k),
+        floor: |_| None,
         published: false,
     },
     Track {
@@ -193,6 +214,7 @@ const TRACK: &[Track] = &[
         unit: "K",
         pick: |s| s.state.t_cht[3],
         limit: |l| Some(l.redline.cht_max_k),
+        floor: |_| None,
         published: false,
     },
 ];
@@ -206,6 +228,8 @@ pub struct Series {
     pub unit: &'static str,
     /// The certified limit, or `None` for a context channel.
     pub limit: Option<f64>,
+    /// The certified lower limit, where the channel's binding end is the bottom.
+    pub floor: Option<f64>,
     /// Whether that limit is published or estimated. Meaningless without a limit.
     pub published: bool,
     /// One value per sample.
@@ -219,12 +243,17 @@ pub struct Exceedance {
     pub channel: &'static str,
     /// The limit crossed, in the channel's own unit.
     pub limit: f64,
+    /// Whether the channel went **under** the limit rather than over it. Oil
+    /// pressure is the only one that can, and reading a crossing without it
+    /// reports a starved gallery as an over-pressure.
+    pub below: bool,
     /// Mission time of the first sample past it, seconds. Absolute, so it reads
     /// against the same clock every other screen shows.
     pub t_s: f64,
     /// Seconds from the seed to that crossing, which is what an operator acts on.
     pub in_s: f64,
-    /// Highest value reached over the horizon.
+    /// The extreme reached over the horizon, in the direction of the limit: the
+    /// highest value for an upper limit, the lowest for a floor.
     pub peak: f64,
     /// Whether the limit crossed is published or estimated.
     pub published: bool,
@@ -340,6 +369,7 @@ pub fn project(seed: &Seed, base: &EngineParams, profile: Profile, horizon_s: f6
             name: track.name,
             unit: track.unit,
             limit: (track.limit)(&plant.params.limits),
+            floor: (track.floor)(&plant.params.limits),
             published: track.published,
             values,
         })
@@ -384,26 +414,97 @@ fn seed_health(health: &Health) -> Vec<SeedParam> {
 fn exceedances(series: &[Series], t_s: &[f32], from_t_s: f64) -> Vec<Exceedance> {
     let mut found: Vec<Exceedance> = series
         .iter()
-        .filter_map(|s| {
-            let limit = s.limit?;
-            let peak = s
-                .values
-                .iter()
-                .fold(f64::NEG_INFINITY, |a, &v| a.max(f64::from(v)));
-            let first = s.values.iter().position(|&v| f64::from(v) > limit)?;
-            let at = f64::from(t_s[first]);
-            Some(Exceedance {
-                channel: s.name,
-                limit,
-                t_s: at,
-                in_s: at - from_t_s,
-                peak,
-                published: s.published,
-            })
+        .flat_map(|s| {
+            let over = s
+                .limit
+                .and_then(|limit| crossing(s, t_s, from_t_s, limit, false));
+            let under = s
+                .floor
+                .and_then(|floor| crossing(s, t_s, from_t_s, floor, true));
+            [over, under]
         })
+        .flatten()
         .collect();
     found.sort_by(|a, b| a.t_s.total_cmp(&b.t_s));
     found
+}
+
+/// The first sample past `limit` at one end, and the extreme reached at that end.
+///
+/// Both ends matter and only one used to be tested. EASA TCDS E.200 publishes a
+/// minimum oil pressure of 2.5 bar at maximum continuous, and the hot-weather leg
+/// runs 650 s of its 3,600 s under it while the forecast read NO LIMIT CROSSED,
+/// because a floor compared with `>` never fires.
+fn crossing(s: &Series, t_s: &[f32], from_t_s: f64, limit: f64, below: bool) -> Option<Exceedance> {
+    let past = |v: f64| if below { v < limit } else { v > limit };
+    let first = s.values.iter().position(|&v| past(f64::from(v)))?;
+    let peak = s.values.iter().map(|&v| f64::from(v)).fold(
+        if below {
+            f64::INFINITY
+        } else {
+            f64::NEG_INFINITY
+        },
+        if below { f64::min } else { f64::max },
+    );
+    let at = f64::from(t_s[first]);
+    Some(Exceedance {
+        channel: s.name,
+        limit,
+        below,
+        t_s: at,
+        in_s: at - from_t_s,
+        peak,
+        published: s.published,
+    })
+}
+
+#[cfg(test)]
+mod exceedance_tests {
+    use super::*;
+
+    fn series(
+        name: &'static str,
+        values: &[f32],
+        limit: Option<f64>,
+        floor: Option<f64>,
+    ) -> Series {
+        Series {
+            name,
+            unit: "bar",
+            limit,
+            floor,
+            published: true,
+            values: values.to_vec(),
+        }
+    }
+
+    /// The bug this pair exists for: oil pressure has a published floor as well as
+    /// a ceiling, and a leg that dips under the floor read as clear.
+    #[test]
+    fn a_channel_under_its_floor_is_an_exceedance() {
+        let s = series("OIL P", &[3.0, 2.4, 2.3, 3.0], Some(6.5), Some(2.5));
+        let t = [0.0f32, 1.0, 2.0, 3.0];
+        let found = exceedances(&[s], &t, 0.0);
+
+        assert_eq!(found.len(), 1, "one crossing, at the floor");
+        assert!(found[0].below, "crossed the floor, not the ceiling");
+        assert!((found[0].limit - 2.5).abs() < 1e-9);
+        assert!((found[0].t_s - 1.0).abs() < 1e-9, "first sample under it");
+        // f32 storage, so the widened value is 2.29999995 and the bound has to
+        // allow for it rather than assert an exactness the wire does not carry.
+        assert!(
+            (found[0].peak - 2.3).abs() < 1e-6,
+            "the extreme in the direction crossed is the minimum, got {}",
+            found[0].peak
+        );
+    }
+
+    #[test]
+    fn a_channel_inside_both_ends_crosses_nothing() {
+        let s = series("OIL P", &[3.0, 4.0, 3.5], Some(6.5), Some(2.5));
+        let t = [0.0f32, 1.0, 2.0];
+        assert!(exceedances(&[s], &t, 0.0).is_empty());
+    }
 }
 
 /// The profile's name on the wire.

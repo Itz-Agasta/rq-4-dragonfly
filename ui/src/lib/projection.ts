@@ -20,6 +20,8 @@ export interface ProjectedSeries {
   unit: string;
   /** The certified limit, or null for a channel nothing alarms on. */
   limit: number | null;
+  /** The certified lower limit, where the channel's binding end is the bottom. */
+  floor: number | null;
   /** Whether that limit is published or estimated. Meaningless without a limit. */
   published: boolean;
   values: number[];
@@ -29,6 +31,8 @@ export interface ProjectedSeries {
 export interface Exceedance {
   channel: string;
   limit: number;
+  /** Whether the channel went under the limit rather than over it. */
+  below: boolean;
   /** Mission time of the crossing, absolute. */
   t_s: number;
   /** Seconds from the seed to the crossing. */

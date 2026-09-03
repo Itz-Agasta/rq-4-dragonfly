@@ -23,6 +23,8 @@ interface Margin {
   unit: string;
   limit: number;
   peak: number;
+  /** Whether the binding end is the floor, so the label reads the right way. */
+  below: boolean;
   /** Limit less peak. Never negative here: a channel that crossed is an exceedance. */
   margin: number;
   published: boolean;
@@ -41,18 +43,38 @@ function margins(projection: Projection): Margin[] {
   const crossed = new Set(projection.exceedances.map((one) => one.channel));
   return projection.series
     .flatMap((series) => {
-      if (series.limit === null || crossed.has(series.name)) return [];
-      const peak = Math.max(...series.values);
-      return [
-        {
+      if (crossed.has(series.name)) return [];
+      // Whichever end binds. Oil pressure holds a published floor as well as a
+      // ceiling, and measuring it against the ceiling alone reported the most
+      // headroom on the channel that was closest to failing.
+      const ends: Margin[] = [];
+      if (series.limit !== null) {
+        const peak = Math.max(...series.values);
+        ends.push({
           channel: series.name,
           unit: series.unit,
           limit: series.limit,
           peak,
           margin: series.limit - peak,
+          below: false,
           published: series.published,
-        },
-      ];
+        });
+      }
+      if (series.floor !== null) {
+        const trough = Math.min(...series.values);
+        ends.push({
+          channel: series.name,
+          unit: series.unit,
+          limit: series.floor,
+          peak: trough,
+          margin: trough - series.floor,
+          below: true,
+          published: series.published,
+        });
+      }
+      // One row per channel, the tighter end, so a channel cannot appear twice
+      // and claim both comfort and danger.
+      return ends.toSorted((a, b) => a.margin - b.margin).slice(0, 1);
     })
     .toSorted((a, b) => a.margin - b.margin);
 }
@@ -137,7 +159,8 @@ function MarginRow({ margin }: { margin: Margin }) {
       </div>
       <div className="label-micro mt-[2px] flex justify-between normal-case">
         <span>
-          peak {fmt(margin.peak, 1)} of {fmt(margin.limit, 1)}
+          {margin.below ? "low" : "peak"} {fmt(margin.peak, 1)} of {fmt(margin.limit, 1)}
+          {margin.below ? " min" : ""}
         </span>
         <span className={margin.published ? "" : "text-foreground-dim"}>
           {margin.published ? "published" : "◊ estimated"}
@@ -156,7 +179,8 @@ function Row({ exceedance }: { exceedance: Exceedance }) {
       </div>
       <div className="label-micro mt-[5px] flex justify-between normal-case">
         <span>
-          limit {fmt(exceedance.limit, 1)} · peak {fmt(exceedance.peak, 1)}
+          {exceedance.below ? "minimum" : "limit"} {fmt(exceedance.limit, 1)} ·{" "}
+          {exceedance.below ? "low" : "peak"} {fmt(exceedance.peak, 1)}
         </span>
         <span className={exceedance.published ? "" : "text-foreground-dim"}>
           {exceedance.published ? "published" : "◊ estimated"}

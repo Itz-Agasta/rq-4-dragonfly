@@ -57,7 +57,11 @@ function scales(projection: Projection): Map<string, Scale> {
   const out = new Map<string, Scale>();
   for (const [key, group] of members) {
     const limit = group[0]?.limit ?? null;
-    out.set(key, span(group.map((one) => scaleOf(one.values, limit ?? undefined))));
+    const floor = group[0]?.floor ?? null;
+    const scale = span(group.map((one) => scaleOf(one.values, limit ?? undefined)));
+    // A floor is pulled into view the way a limit is. Drawn outside the box it
+    // would be a limit the trace is silently never compared against.
+    out.set(key, floor === null ? scale : { ...scale, lo: Math.min(scale.lo, floor) });
   }
   return out;
 }
@@ -111,6 +115,19 @@ function Cell({ series, scale }: { series: ProjectedSeries; scale: Scale }) {
         });
   const crossed = over?.some((v) => Number.isFinite(v)) ?? false;
 
+  const floor = series.floor;
+  const under =
+    floor === null
+      ? null
+      : series.values.map((value, i) => {
+          const near =
+            value < floor ||
+            (series.values[i - 1] ?? Infinity) < floor ||
+            (series.values[i + 1] ?? Infinity) < floor;
+          return near ? value : Number.NaN;
+        });
+  const sank = under?.some((v) => Number.isFinite(v)) ?? false;
+
   return (
     <div className="border-border flex min-h-0 min-w-0 flex-col border-r border-b px-3 pt-2 pb-1">
       <div className="flex items-baseline justify-between gap-2">
@@ -151,9 +168,30 @@ function Cell({ series, scale }: { series: ProjectedSeries; scale: Scale }) {
           strokeWidth="2"
           vectorEffect="non-scaling-stroke"
         />
+        {floor !== null && !scale.flat ? (
+          <line
+            x1="0"
+            y1={yOf(floor, scale)}
+            x2={BOX}
+            y2={yOf(floor, scale)}
+            stroke="var(--crit)"
+            strokeWidth="1"
+            strokeDasharray="5 4"
+            vectorEffect="non-scaling-stroke"
+          />
+        ) : null}
         {over && crossed ? (
           <path
             d={path(over, scale)}
+            fill="none"
+            stroke="var(--primary)"
+            strokeWidth="2"
+            vectorEffect="non-scaling-stroke"
+          />
+        ) : null}
+        {under && sank ? (
+          <path
+            d={path(under, scale)}
             fill="none"
             stroke="var(--primary)"
             strokeWidth="2"
@@ -165,6 +203,7 @@ function Cell({ series, scale }: { series: ProjectedSeries; scale: Scale }) {
       <div className="label-micro mt-[3px] flex justify-between normal-case">
         <span>
           {limit === null ? "no limit" : `limit ${fmt(limit, Math.abs(limit) >= 100 ? 1 : 2)}`}
+          {floor === null ? "" : ` · min ${fmt(floor, Math.abs(floor) >= 100 ? 1 : 2)}`}
         </span>
         {limit === null ? null : (
           <span className={series.published ? "" : "text-foreground-dim"}>
