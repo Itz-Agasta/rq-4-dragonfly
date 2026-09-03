@@ -8,8 +8,8 @@
 import { createBrowserRouter, Navigate } from "react-router";
 
 import { Analysis } from "@/components/analysis/Analysis";
-import { NotBuilt } from "@/components/app/NotBuilt";
 import { Shell } from "@/components/app/Shell";
+import { Fleet } from "@/components/fleet/Fleet";
 import { Ops } from "@/components/ops/Ops";
 import { Replay } from "@/components/replay/Replay";
 import { Simulate } from "@/components/simulate/Simulate";
@@ -26,10 +26,7 @@ export const router = createBrowserRouter([
       { path: "analysis", element: <Analysis /> },
       { path: "simulate", element: <Simulate /> },
       { path: "replay", element: <Replay /> },
-      {
-        path: "fleet",
-        element: <NotBuilt title="FLEET" note="fleet health · not built" />,
-      },
+      { path: "fleet", element: <Fleet /> },
     ],
   },
 ]);
