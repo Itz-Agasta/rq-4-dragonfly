@@ -50,6 +50,12 @@ export function Hypotheses({ data }: { data: Matrix }) {
       if (evidence.current) evidence.current.textContent = "waiting for the twin";
       rows.current.forEach((row) => row && (row.style.display = "none"));
       rejected.current.forEach((row) => row && (row.style.display = "none"));
+      // Every sink this component owns is cleared here, the spent panel
+      // included. Left alone it holds its last index beside three panels saying
+      // the twin is gone, which reads as the one live number on the screen.
+      if (spentName.current) spentName.current.textContent = NO_VALUE;
+      if (spentValue.current) spentValue.current.textContent = NO_VALUE;
+      if (spentNote.current) spentNote.current.textContent = "waiting for the twin";
       return;
     }
 
