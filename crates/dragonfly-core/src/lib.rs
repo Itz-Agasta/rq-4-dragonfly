@@ -11,6 +11,7 @@
 //! binary alone, which is what lets the generator run with no bus and no clock.
 
 pub mod ingest;
+pub mod project;
 pub mod record;
 pub mod replay;
 pub mod server;
