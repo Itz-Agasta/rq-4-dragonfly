@@ -273,4 +273,13 @@ oil_p_min_pa = 2.5e5 # published, 2.5 bar at maximum continuous
 oil_p_max_pa = 6.5e5 # published, 6.5 bar
 coolant_t_max_k = 373.15 # published, 100 C
 egt_max_k = 1123.15 # estimated, 850 C, the top of the band a turbo diesel runs at
-cht_max_k = 453.15 # estimated, 180 C at the head metal for an aluminium head
+# The E4 publishes no cylinder head limit: Austro's Operation Manual limits oil,
+# coolant, fuel and speed, its emergency procedures carry no CHT case, and the DA42
+# G1000 does not display CHT. The head is held by the EECU fuelling limiter, not
+# shown to a pilot, so the binding number is the aluminium alloy's strength bound.
+# Measured diesel head metal reaches 558 K at the exhaust valve bridge, so 180 C is
+# below what a real head runs at; read handover.md 6.3 before lowering this.
+# Sharma, "Surface Temperature Prediction and Thermal Analysis of Cylinder Head",
+# IJERA 3(4), fig. 12.
+# https://www.ijera.com/papers/Vol3_issue4/ET34892902.pdf
+cht_max_k = 523.15 # estimated, 250 C at the head metal
