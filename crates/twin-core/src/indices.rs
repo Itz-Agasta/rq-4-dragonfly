@@ -89,6 +89,10 @@ pub struct Scored {
 const BUS_NOMINAL_V: f64 = 27.8;
 /// Departure from the nominal bus at which the electrical system has failed, V.
 const BUS_LIMIT_V: f64 = 2.5;
+/// Fraction of [`BUS_LIMIT_V`] the bus must depart before the reported limit
+/// takes a side. A tenth is well outside the measured noise at nominal and far
+/// inside any departure worth naming.
+const SIDE_DEAD_BAND: f64 = 0.1;
 
 /// Broadband vibration on a healthy engine at no load and at the rating, g RMS.
 ///
@@ -253,11 +257,21 @@ fn combustion(unexplained: &[f64]) -> Scored {
 /// under-volt limit reads as healthy at exactly the moment it is not.
 fn electrical(aux: &Auxiliary) -> Scored {
     let departure = aux.bus_v - BUS_NOMINAL_V;
+    // A healthy bus sits at nominal, where the sign of the departure is noise, so
+    // `copysign` alone alternated the reported limit between the two sides several
+    // times a second: measured 229 frames at 25.3 against 370 at 30.3 in ten. The
+    // side is only meaningful once the bus has actually gone somewhere, and below
+    // that the under-volt limit is the one that grounds an aircraft.
+    let side = if departure.abs() < SIDE_DEAD_BAND * BUS_LIMIT_V {
+        -1.0
+    } else {
+        departure
+    };
     Scored {
         value: (100.0 * (1.0 - departure.abs() / BUS_LIMIT_V)).clamp(0.0, 100.0),
         driver: "bus",
         driver_value: aux.bus_v,
-        driver_limit: BUS_NOMINAL_V + BUS_LIMIT_V.copysign(departure),
+        driver_limit: BUS_NOMINAL_V + BUS_LIMIT_V.copysign(side),
     }
 }
 

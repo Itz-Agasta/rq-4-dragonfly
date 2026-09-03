@@ -80,7 +80,10 @@ export function TopBar({ screen }: { screen: string }) {
               palette does not spend colour on things being normal. */}
           <span className="bg-muted-foreground block size-[6px] shrink-0" aria-hidden="true" />
           <span className="text-[11px] tracking-[0.1em] whitespace-nowrap">
-            <Live select={(f) => f.engine_state} placeholder={NO_VALUE} />
+            {/* A recording written before the state column existed reports it
+                empty, and `Live` writes whatever it selects, so the dash has to
+                come from here or the pill renders as a lone square. */}
+            <Live select={(f) => f.engine_state || NO_VALUE} placeholder={NO_VALUE} />
           </span>
         </div>
 

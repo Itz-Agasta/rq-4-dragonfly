@@ -444,7 +444,11 @@ fn state_name(recorded: &str) -> &'static str {
         "STARTING" => "STARTING",
         "RUNNING" => "RUNNING",
         "FAULT" => "FAULT",
-        _ => "STOPPED",
+        "STOPPED" => "STOPPED",
+        // A recording written before this column existed reads empty here, and
+        // defaulting that to STOPPED put "engine stopped" beside 3,721 rpm on the
+        // four hour mission. Absent is not stopped; the screen shows a dash.
+        _ => "",
     }
 }
 

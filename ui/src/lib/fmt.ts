@@ -30,11 +30,16 @@ export function fmt(value: number, dp = 0): string {
  * not, so an uncapped panel prints `100.0%` for a posterior measured at
  * 0.9999840984. Another decimal only moves the same problem to 99.99%. The `>`
  * says the cap is doing the work, as it does for the CUSUM in `DetectionBar`.
+ *
+ * `exact` for the null hypothesis, which reads 1.0 because isolation is gated on
+ * detection rather than because a ratio saturated. Capping that one prints
+ * `>99.9%` on a healthy engine and claims an uncertainty the number does not
+ * carry.
  */
-export function posteriorPct(posterior: number): string {
+export function posteriorPct(posterior: number, exact = false): string {
   if (!Number.isFinite(posterior)) return NO_VALUE;
   const percent = posterior * 100;
-  return percent >= 99.95 ? ">99.9" : fmt(percent, 1);
+  return !exact && percent >= 99.95 ? ">99.9" : fmt(percent, 1);
 }
 
 /**

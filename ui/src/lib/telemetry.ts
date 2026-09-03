@@ -32,7 +32,13 @@ export interface SourceAges {
 }
 
 /** Engine state as the controller reports it. */
-export type EngineState = "STOPPED" | "STARTING" | "RUNNING" | "FAULT";
+/**
+ * Engine state as the controller reports it.
+ *
+ * The empty case is a recording written before the column existed, which is not
+ * the same as a stopped engine and must not be drawn as one.
+ */
+export type EngineState = "STOPPED" | "STARTING" | "RUNNING" | "FAULT" | "";
 
 /**
  * Position of each compared channel in the twin's arrays.

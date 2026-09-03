@@ -63,7 +63,7 @@ export function Hypotheses({ data }: { data: Matrix }) {
     const best = diagnosis.best;
     const posterior = diagnosis.posterior[best] ?? 0;
     if (headline.current) headline.current.textContent = data.hypotheses[best];
-    if (percent.current) percent.current.textContent = `${posteriorPct(posterior)}%`;
+    if (percent.current) percent.current.textContent = `${posteriorPct(posterior, best === 0)}%`;
     if (bar.current) bar.current.style.width = `${Math.round(posterior * 100)}%`;
     if (kind.current) {
       kind.current.textContent = data.instrument[best]

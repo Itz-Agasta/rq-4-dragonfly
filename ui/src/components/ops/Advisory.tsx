@@ -62,7 +62,9 @@ export function Advisory() {
     if (confidence.current) {
       const posterior = diagnosed ? twin.diagnosis.posterior[twin.diagnosis.best] : undefined;
       confidence.current.textContent =
-        posterior === undefined ? "" : `confidence ${posteriorPct(posterior)}%`;
+        posterior === undefined
+          ? ""
+          : `confidence ${posteriorPct(posterior, twin?.diagnosis.best === 0)}%`;
     }
 
     // The limiting subsystem rather than the worst parameter: an operator is
@@ -82,7 +84,7 @@ export function Advisory() {
           ? diagnosed
             ? "no decline fitted"
             : ""
-          : `${subsystem} · p10 ${fmt(rul?.p10 ?? Number.NaN, 1)} h`;
+          : `${subsystem} · p10 ${fmt(rul?.p10 ?? Number.NaN, 2)} h`;
     }
 
     const task = diagnosed ? TASKS[twin.diagnosis.best] : null;

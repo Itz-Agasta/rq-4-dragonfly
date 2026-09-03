@@ -79,7 +79,12 @@ export function span(all: Series[]): Scale {
     if (one.lo < lo) lo = one.lo;
     if (one.hi > hi) hi = one.hi;
   }
-  return { lo, hi, flat: !Number.isFinite(lo) || hi - lo < FLAT_SPAN };
+  // The relative test, matching [`scaleOf`]. The absolute one alone called boost
+  // varying 0.51 kPa in 310 a real excursion and drew it at full cell height
+  // beside a readout saying "constant". A channel with no limit has no floor to
+  // hold its scale open, so it is the one that fills the cell on nothing.
+  const flat = !Number.isFinite(lo) || hi - lo < Math.max(FLAT_SPAN, Math.abs(hi) * RELATIVE_FLAT);
+  return { lo, hi, flat };
 }
 
 /**
