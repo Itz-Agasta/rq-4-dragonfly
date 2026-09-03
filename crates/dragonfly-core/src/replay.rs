@@ -71,7 +71,9 @@ pub fn list(dir: &Path) -> Result<Vec<MissionInfo>> {
         let Ok(file) = File::open(&path) else {
             continue;
         };
-        let bytes = file.metadata().map_or(0, |m| m.len());
+        let stat = file.metadata().ok();
+        let bytes = stat.as_ref().map_or(0, std::fs::Metadata::len);
+        let modified = stat.and_then(|m| m.modified().ok());
         // **The mission being flown right now is here and cannot be opened.**
         // Parquet writes its schema and row groups in a footer at close, so a
         // recording in progress has no readable structure and nothing to replay.
@@ -80,15 +82,23 @@ pub fn list(dir: &Path) -> Result<Vec<MissionInfo>> {
         };
         let metadata = builder.metadata();
         let frames = metadata.file_metadata().num_rows().max(0) as usize;
-        out.push(MissionInfo {
-            id: id.to_owned(),
-            frames,
-            duration_s: duration_from_statistics(metadata),
-            bytes,
-        });
+        out.push((
+            modified,
+            MissionInfo {
+                id: id.to_owned(),
+                frames,
+                duration_s: duration_from_statistics(metadata),
+                bytes,
+            },
+        ));
     }
-    out.sort_by(|a, b| a.id.cmp(&b.id));
-    Ok(out)
+    // By write time, because the client takes the last entry as the newest and
+    // the ids do not order chronologically: `mission-coking4h` sorts after every
+    // `mission-<epoch>` whatever its age, so a recording made this morning lost
+    // to one made last week. A file with no readable time sorts first, where it
+    // cannot be mistaken for the latest.
+    out.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.id.cmp(&b.1.id)));
+    Ok(out.into_iter().map(|(_, info)| info).collect())
 }
 
 /// Mission length from the footer's column statistics, without reading a row.
