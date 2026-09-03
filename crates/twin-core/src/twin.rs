@@ -274,6 +274,20 @@ impl Twin {
         self.filter.is_some()
     }
 
+    /// The engine state the filter currently believes in, or `None` before it has
+    /// an estimate.
+    ///
+    /// Deliberately not on [`TwinOutput`]. Every field of that struct is on the
+    /// wire twenty times a second, and no display draws a manifold pressure the
+    /// filter inferred rather than measured. This exists for the one caller that
+    /// needs a starting point to integrate the model forward from, and it hands
+    /// back the mean alone: a projection that carried the covariance would be
+    /// claiming an interval the model run does not produce.
+    #[must_use]
+    pub fn state(&self) -> Option<State> {
+        self.filter.as_ref().map(|f| unpack(f.mean()))
+    }
+
     /// Advance one telemetry frame.
     ///
     /// `Ok(None)` means the measurement was unusable and nothing advanced, so no
