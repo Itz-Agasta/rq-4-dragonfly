@@ -15,7 +15,8 @@ import { linkIsUp, twinIsLocked, useApp } from "@/store/app";
 import { channel } from "@/store/frame";
 import { useReplay } from "@/store/replay";
 
-const AIRFRAME = "TAPAS-AF07";
+// Exported so FLEET can mark this station's own row rather than repeating the string.
+export const AIRFRAME = "TAPAS-AF07";
 
 function Rule() {
   return <span className="bg-border w-px self-stretch" aria-hidden="true" />;
