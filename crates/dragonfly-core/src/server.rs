@@ -10,8 +10,8 @@
 //! the browser spends real time parsing them.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
@@ -21,12 +21,14 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use dronecan_ice::FaultCommand;
+use engine_model::EngineParams;
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
+use crate::project::{self, Projection, Seed};
 use crate::replay;
 use crate::telemetry::Frame;
 use twin_core::channels::TABLE;
@@ -102,6 +104,17 @@ pub struct AppState {
     pub commands: mpsc::Sender<Command>,
     /// Directory recorded missions are read from and written to.
     pub record_dir: PathBuf,
+    /// The engine as it was fitted when new. A projection applies the health
+    /// estimate to this, so it is the same parameter set the twin runs on.
+    pub params: Arc<EngineParams>,
+    /// Latest starting point a projection can be run from, or `None` before the
+    /// twin has an estimate.
+    ///
+    /// A snapshot rather than a handle on the filter. The estimator lives in the
+    /// ingest loop and is stepped there twenty times a second; lending it to a
+    /// request that holds it for seconds of projection would stall the bus. The
+    /// critical section here is a struct copy at both ends.
+    pub seed: Arc<Mutex<Option<Seed>>>,
 }
 
 /// A command on its way to the bus, and the channel that reports it got there.
@@ -211,6 +224,7 @@ pub fn router(state: AppState, ui_dir: PathBuf) -> Router {
         .route("/api/fault", post(fault))
         .route("/api/missions", get(missions))
         .route("/api/missions/{id}", get(mission))
+        .route("/api/project", get(projection))
         .fallback_service(files)
         // The bundle is same-origin in the kiosk, but the Vite dev server is not,
         // and D7 onward is developed against it.
@@ -341,6 +355,86 @@ async fn mission(
 
     let Ok(payload) = rmp_serde::to_vec_named(&frames) else {
         return (StatusCode::INTERNAL_SERVER_ERROR, "cannot encode mission").into_response();
+    };
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/msgpack")],
+        payload,
+    )
+        .into_response()
+}
+
+/// What `GET /api/project` accepts.
+#[derive(Debug, serde::Deserialize)]
+pub struct ProjectRequest {
+    /// Mission profile to fly, by the name the API uses.
+    profile: String,
+    /// How far forward to fly it, hours. Clamped by the projector rather than
+    /// rejected, so a caller asking for a week gets the longest answer the
+    /// endpoint will compute instead of an error it has to handle.
+    hours: f64,
+}
+
+/// Fly the engine the twin currently believes in through a mission profile.
+///
+/// Answers **409** rather than an empty projection when the twin has no current
+/// estimate, which covers a filter that discarded one and a bus that has gone
+/// quiet under a filter still holding one.
+/// A projection with no seed would be a healthy engine flying a profile, which is
+/// a simulator run wearing a twin's label, and a screen cannot tell the two apart
+/// from the payload.
+async fn projection(
+    State(state): State<AppState>,
+    Query(request): Query<ProjectRequest>,
+) -> impl IntoResponse {
+    let Ok(profile) = project::profile_named(&request.profile) else {
+        return (StatusCode::BAD_REQUEST, "not a mission profile").into_response();
+    };
+    // `"NaN"` parses as an `f64` and survives `clamp`. Rejected rather than
+    // substituted: a caller asking for a horizon this cannot read should hear
+    // so, not be handed the answer to a different question.
+    if !request.hours.is_finite() {
+        return (StatusCode::BAD_REQUEST, "hours must be a finite number").into_response();
+    }
+    // Poison is recovered from rather than propagated: what the lock guards is a
+    // snapshot copied in and out under it, so a panic elsewhere cannot have left
+    // it half written.
+    let seed = *state
+        .seed
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(seed) = seed else {
+        return (StatusCode::CONFLICT, "no current estimate to project from").into_response();
+    };
+
+    let params = Arc::clone(&state.params);
+    let horizon_s = request.hours * 3600.0;
+    // Seconds of arithmetic at the horizons this accepts, and it holds a core for
+    // all of them. On the runtime it would stall every other request, the
+    // WebSocket fan-out included.
+    let projected =
+        tokio::task::spawn_blocking(move || project::project(&seed, &params, profile, horizon_s))
+            .await;
+    let projected: Projection = match projected {
+        Ok(projection) => projection,
+        Err(error) => {
+            tracing::error!(%error, "the projection task failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "cannot project").into_response();
+        }
+    };
+    tracing::info!(
+        profile = projected.profile,
+        horizon_s = projected.horizon_s,
+        speed_x = projected.speed_x,
+        exceedances = projected.exceedances.len(),
+        "projected"
+    );
+
+    let Ok(payload) = rmp_serde::to_vec_named(&projected) else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "cannot encode projection",
+        )
+            .into_response();
     };
     (
         [(axum::http::header::CONTENT_TYPE, "application/msgpack")],

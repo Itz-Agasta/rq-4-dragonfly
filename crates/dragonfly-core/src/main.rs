@@ -13,7 +13,7 @@
 //! subscriber, because it only reads.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -25,6 +25,7 @@ use tokio::sync::{broadcast, mpsc};
 use twin_core::Twin;
 
 use dragonfly_core::ingest::{Decoded, Ingest};
+use dragonfly_core::project::Seed;
 use dragonfly_core::record::Recorder;
 use dragonfly_core::server::{self, AppState, LinkStatus};
 use dragonfly_core::telemetry::{self, Fusion, SLOW_STALE_AFTER, STALE_AFTER};
@@ -95,6 +96,10 @@ async fn main() -> Result<()> {
     let link = Arc::new(LinkStatus::default());
     let params = engine_model::engines::ae330();
 
+    let params = Arc::new(params);
+    // Written by the twin loop, read by a projection request.
+    let seed = Arc::new(Mutex::new(None));
+
     let state = AppState {
         frames: frames.clone(),
         iface: args.iface.clone(),
@@ -105,6 +110,8 @@ async fn main() -> Result<()> {
         signatures: Arc::new(twin_core::Signatures::generate(&params)),
         commands,
         record_dir: args.record_dir.clone(),
+        params: Arc::clone(&params),
+        seed: Arc::clone(&seed),
     };
     let app = server::router(state, args.ui_dir.clone());
 
@@ -139,6 +146,7 @@ async fn main() -> Result<()> {
         frames,
         link,
         params,
+        seed,
         command_rx,
     ));
 
@@ -253,7 +261,8 @@ async fn ingest_loop(
     command_data_type_id: u16,
     frames: broadcast::Sender<Arc<telemetry::Frame>>,
     link: Arc<LinkStatus>,
-    params: EngineParams,
+    params: Arc<EngineParams>,
+    seed: Arc<Mutex<Option<Seed>>>,
     mut commands: mpsc::Receiver<server::Command>,
 ) -> Result<()> {
     // The twin is built per connection rather than per process. A bus that has
@@ -261,6 +270,12 @@ async fn ingest_loop(
     // since moved, and re-seeding from the first frame back costs one millisecond.
     let mut backoff = Duration::from_millis(250);
     loop {
+        // The twin is rebuilt per connection, so an estimate never survives a
+        // dropout and the seed taken from it must not either. Cleared before
+        // the socket opens, which covers both a pump that returned and an
+        // interface that will not open at all.
+        *seed.lock().unwrap_or_else(PoisonError::into_inner) = None;
+
         match CanSocket::open(&iface) {
             Ok(socket) => {
                 backoff = Duration::from_millis(250);
@@ -271,6 +286,7 @@ async fn ingest_loop(
                     &frames,
                     &link,
                     &params,
+                    &seed,
                     &mut commands,
                 )
                 .await
@@ -297,6 +313,7 @@ async fn pump(
     frames: &broadcast::Sender<Arc<telemetry::Frame>>,
     link: &LinkStatus,
     params: &EngineParams,
+    seed: &Mutex<Option<Seed>>,
     commands: &mut mpsc::Receiver<server::Command>,
 ) -> Result<()> {
     let mut ingest = Ingest::new(auxiliary_data_type_id);
@@ -307,6 +324,7 @@ async fn pump(
     // has no business knowing that anyone is extrapolating it.
     let mut trends = prognostics::Trends::new();
     let mut logged = Instant::now();
+    let mut published = Instant::now();
     let mut transfer_ids = dronecan_ice::TransferIdMap::new();
 
     loop {
@@ -335,7 +353,10 @@ async fn pump(
         let read = tokio::time::timeout(IDLE_TICK, socket.read_frame()).await;
         let now = Instant::now();
 
-        let mut publish = false;
+        // A tick of silence from the engine, not from the whole bus: another node
+        // publishing faster than `IDLE_TICK` starves the read timeout, and a
+        // silent engine would then never publish again. Free on a healthy bus.
+        let mut publish = now.duration_since(published) >= IDLE_TICK;
         if let Ok(frame) = read {
             let frame = frame.context("reading a CAN frame")?;
             let Id::Extended(id) = frame.id() else {
@@ -360,6 +381,7 @@ async fn pump(
         }
 
         if publish && let Some(mut frame) = fusion.frame(now) {
+            published = now;
             let stale = !frame.link_ok;
             // `link_ok` covers only the engine controller, and a silent auxiliary
             // or air-data node would feed the estimator the same frozen reading
@@ -387,6 +409,22 @@ async fn pump(
                     }
                     Ok(None) => {}
                     Err(error) => tracing::warn!(%error, "twin lost its estimate, re-seeding"),
+                }
+            }
+
+            // Both halves, because a filter holds its estimate long after anyone
+            // stopped updating it: a quiet bus does not error the read. An
+            // unusable measurement is not staleness, so `Ok(None)` leaves it.
+            {
+                let mut held = seed.lock().unwrap_or_else(PoisonError::into_inner);
+                if !measurement_fresh || !twin.is_seeded() {
+                    *held = None;
+                } else if let (Some(output), Some(state)) = (frame.twin.as_ref(), twin.state()) {
+                    *held = Some(Seed {
+                        t_s: frame.t_s,
+                        state,
+                        theta: output.theta,
+                    });
                 }
             }
             // Read back out of the frame rather than off the twin, so the link

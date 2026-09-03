@@ -9,7 +9,7 @@
 
 import { useMemo, useRef } from "react";
 
-import { BOX, path, type Series, series } from "@/components/replay/trace";
+import { BOX, path, type Series, series } from "@/components/trace";
 import { fmt, kelvinToCelsius, metresToFeet } from "@/lib/fmt";
 import { Live, useLiveSink } from "@/lib/live";
 import type { Frame } from "@/lib/telemetry";

@@ -681,6 +681,7 @@ dependencies = [
  "arrow",
  "axum",
  "clap",
+ "dragonfly-sim",
  "dronecan-ice",
  "engine-model",
  "futures-util",
