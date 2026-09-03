@@ -10,7 +10,7 @@
 
 import { useMemo, useRef } from "react";
 
-import { BOX, path, series, span } from "@/components/replay/trace";
+import { BOX, path, series, span } from "@/components/trace";
 import { fmt, missionClock } from "@/lib/fmt";
 import { Live, useLiveSink } from "@/lib/live";
 import { type Frame, TWIN } from "@/lib/telemetry";
