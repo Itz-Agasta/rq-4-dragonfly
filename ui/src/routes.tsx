@@ -12,6 +12,7 @@ import { NotBuilt } from "@/components/app/NotBuilt";
 import { Shell } from "@/components/app/Shell";
 import { Ops } from "@/components/ops/Ops";
 import { Replay } from "@/components/replay/Replay";
+import { Simulate } from "@/components/simulate/Simulate";
 import { Twin } from "@/components/twin/Twin";
 
 export const router = createBrowserRouter([
@@ -23,10 +24,7 @@ export const router = createBrowserRouter([
       { path: "ops", element: <Ops /> },
       { path: "twin", element: <Twin /> },
       { path: "analysis", element: <Analysis /> },
-      {
-        path: "simulate",
-        element: <NotBuilt title="SIMULATE" note="mission projection · not built" />,
-      },
+      { path: "simulate", element: <Simulate /> },
       { path: "replay", element: <Replay /> },
       {
         path: "fleet",
