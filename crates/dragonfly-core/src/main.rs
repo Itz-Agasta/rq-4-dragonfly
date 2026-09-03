@@ -324,6 +324,7 @@ async fn pump(
     // has no business knowing that anyone is extrapolating it.
     let mut trends = prognostics::Trends::new();
     let mut logged = Instant::now();
+    let mut published = Instant::now();
     let mut transfer_ids = dronecan_ice::TransferIdMap::new();
 
     loop {
@@ -352,7 +353,20 @@ async fn pump(
         let read = tokio::time::timeout(IDLE_TICK, socket.read_frame()).await;
         let now = Instant::now();
 
-        let mut publish = false;
+        // A tick's worth of silence *from the engine* is enough to publish, not
+        // only a tick's worth of silence on the whole bus.
+        //
+        // The read timeout alone does not cover this. Any other node publishing
+        // faster than `IDLE_TICK` keeps the read returning, so an engine
+        // controller that stops talking while the auxiliary node carries on
+        // never produces another frame at all: the sequence number freezes, the
+        // link is never marked down, and every readout in the app sits at a live
+        // looking value forever. Measured on a live run at 20 Hz auxiliary, the
+        // sequence stopped dead and `/api/health` went on reporting `link_ok`.
+        //
+        // Costs nothing on a healthy bus, where an engine message every 50 ms
+        // publishes before this deadline is ever reached.
+        let mut publish = now.duration_since(published) >= IDLE_TICK;
         if let Ok(frame) = read {
             let frame = frame.context("reading a CAN frame")?;
             let Id::Extended(id) = frame.id() else {
@@ -377,6 +391,7 @@ async fn pump(
         }
 
         if publish && let Some(mut frame) = fusion.frame(now) {
+            published = now;
             let stale = !frame.link_ok;
             // `link_ok` covers only the engine controller, and a silent auxiliary
             // or air-data node would feed the estimator the same frozen reading
