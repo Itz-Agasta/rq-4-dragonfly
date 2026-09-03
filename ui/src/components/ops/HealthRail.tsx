@@ -18,20 +18,9 @@
 import { useRef } from "react";
 
 import { fmt, NO_VALUE } from "@/lib/fmt";
+import { DEGRADED_BELOW } from "@/lib/health";
 import { useLiveSink } from "@/lib/live";
 import { isFresh, SUBSYSTEM_INFERRED, SUBSYSTEMS } from "@/lib/telemetry";
-
-/**
- * Index below which a subsystem is worth pointing at.
- *
- * A healthy engine settles with its worst subsystem in the mid nineties, because
- * the estimator's own noise moves the parameters by a fraction of a percent and
- * the indices are linear in that. It dips to the high eighties for a few seconds
- * after the twin re-seeds, which happens whenever the bus comes back, so the
- * threshold has to clear that transient as well as the settled value. Eighty does
- * both and is still far above the fifty-six a coked injector produces.
- */
-const DEGRADED_BELOW = 80;
 
 /** Row height, so the seven rows and the header fill the rail exactly. */
 const ROW_H = 52;

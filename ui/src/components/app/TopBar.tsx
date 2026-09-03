@@ -13,6 +13,7 @@ import { Live } from "@/lib/live";
 import { isFresh } from "@/lib/telemetry";
 import { linkIsUp, twinIsLocked, useApp } from "@/store/app";
 import { channel } from "@/store/frame";
+import { useReplay } from "@/store/replay";
 
 const AIRFRAME = "TAPAS-AF07";
 
@@ -41,6 +42,15 @@ export function TopBar({ screen }: { screen: string }) {
   const up = useApp(linkIsUp);
   const socket = useApp((s) => s.socket);
   const locked = useApp(twinIsLocked);
+  const mission = useReplay((s) => (s.status === "ready" ? s.info : null));
+  const loaded = useReplay((s) => s.frames.length);
+  // Frames loaded against frames recorded, rather than the recording's 20 Hz.
+  // The screen reads an overview pass and a rate here reads as the rate it is
+  // drawing at.
+  const replay =
+    screen === "REPLAY" && mission
+      ? `${mission.id}  ${loaded.toLocaleString("en-US")} of ${mission.frames.toLocaleString("en-US")} frames`
+      : "";
 
   return (
     <header className="border-border flex h-10 min-w-0 shrink-0 items-stretch border-b">
@@ -73,46 +83,61 @@ export function TopBar({ screen }: { screen: string }) {
           </span>
         </div>
 
-        <div className="flex items-center gap-2 pr-6 pl-[14px]">
-          {/* The dot pulses only while the twin is locked. A still dot and a
+        {/* On REPLAY the readouts to the left of this are the recording under
+            the playhead, so the live link state does not belong beside them: a
+            bar reading CAN LINK DOWN over a mission that flew four hours ago
+            describes two different aircraft at once. */}
+        {replay ? (
+          <div className="flex items-center gap-2 pr-6 pl-[14px]">
+            <span className="bg-muted-foreground block size-[6px] shrink-0" aria-hidden="true" />
+            <span className="text-muted-foreground text-[11px] tracking-[0.06em] whitespace-nowrap">
+              PLAYBACK
+              <span className="text-structure mx-[6px]">·</span>
+              {replay}
+            </span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 pr-6 pl-[14px]">
+            {/* The dot pulses only while the twin is locked. A still dot and a
               moving one are distinguishable at a glance from across a room,
               which a word in 11px type is not. */}
-          <span
-            className={`block size-[6px] shrink-0 rounded-full ${
-              up ? "bg-muted-foreground" : "bg-structure"
-            } ${up && locked ? "animate-lockpulse" : ""}`}
-            aria-hidden="true"
-          />
-          <span className="text-muted-foreground text-[11px] tracking-[0.06em] whitespace-nowrap">
-            {up ? (
-              <>
-                TWIN
-                <span className="text-structure mx-[6px]">·</span>
-                {/* The number beside the lock is the innovation, not the residual
+            <span
+              className={`block size-[6px] shrink-0 rounded-full ${
+                up ? "bg-muted-foreground" : "bg-structure"
+              } ${up && locked ? "animate-lockpulse" : ""}`}
+              aria-hidden="true"
+            />
+            <span className="text-muted-foreground text-[11px] tracking-[0.06em] whitespace-nowrap">
+              {up ? (
+                <>
+                  TWIN
+                  <span className="text-structure mx-[6px]">·</span>
+                  {/* The number beside the lock is the innovation, not the residual
                     against a healthy engine. It answers whether the twin is
                     tracking the machine in front of it, which stays true while
                     that machine degrades; the residual is the other question and
                     it belongs on the screens that show it channel by channel. */}
-                <Live
-                  select={(f) =>
-                    f.twin
-                      ? f.twin.locked
-                        ? `LOCKED  ${fmt(f.twin.innovation_pct, 2)}%`
-                        : "SYNCING"
-                      : "NOT LOCKED"
-                  }
-                  placeholder="NOT LOCKED"
-                />
-              </>
-            ) : (
-              <>
-                CAN LINK DOWN
-                <span className="text-structure mx-[6px]">·</span>
-                {socket === "open" ? "core up" : "core unreachable"}
-              </>
-            )}
-          </span>
-        </div>
+                  <Live
+                    select={(f) =>
+                      f.twin
+                        ? f.twin.locked
+                          ? `LOCKED  ${fmt(f.twin.innovation_pct, 2)}%`
+                          : "SYNCING"
+                        : "NOT LOCKED"
+                    }
+                    placeholder="NOT LOCKED"
+                  />
+                </>
+              ) : (
+                <>
+                  CAN LINK DOWN
+                  <span className="text-structure mx-[6px]">·</span>
+                  {socket === "open" ? "core up" : "core unreachable"}
+                </>
+              )}
+            </span>
+          </div>
+        )}
       </div>
     </header>
   );
