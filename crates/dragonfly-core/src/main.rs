@@ -13,7 +13,7 @@
 //! subscriber, because it only reads.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -25,6 +25,7 @@ use tokio::sync::{broadcast, mpsc};
 use twin_core::Twin;
 
 use dragonfly_core::ingest::{Decoded, Ingest};
+use dragonfly_core::project::Seed;
 use dragonfly_core::record::Recorder;
 use dragonfly_core::server::{self, AppState, LinkStatus};
 use dragonfly_core::telemetry::{self, Fusion, SLOW_STALE_AFTER, STALE_AFTER};
@@ -95,6 +96,10 @@ async fn main() -> Result<()> {
     let link = Arc::new(LinkStatus::default());
     let params = engine_model::engines::ae330();
 
+    let params = Arc::new(params);
+    // Written by the twin loop, read by a projection request.
+    let seed = Arc::new(Mutex::new(None));
+
     let state = AppState {
         frames: frames.clone(),
         iface: args.iface.clone(),
@@ -105,6 +110,8 @@ async fn main() -> Result<()> {
         signatures: Arc::new(twin_core::Signatures::generate(&params)),
         commands,
         record_dir: args.record_dir.clone(),
+        params: Arc::clone(&params),
+        seed: Arc::clone(&seed),
     };
     let app = server::router(state, args.ui_dir.clone());
 
@@ -139,6 +146,7 @@ async fn main() -> Result<()> {
         frames,
         link,
         params,
+        seed,
         command_rx,
     ));
 
@@ -253,7 +261,8 @@ async fn ingest_loop(
     command_data_type_id: u16,
     frames: broadcast::Sender<Arc<telemetry::Frame>>,
     link: Arc<LinkStatus>,
-    params: EngineParams,
+    params: Arc<EngineParams>,
+    seed: Arc<Mutex<Option<Seed>>>,
     mut commands: mpsc::Receiver<server::Command>,
 ) -> Result<()> {
     // The twin is built per connection rather than per process. A bus that has
@@ -271,6 +280,7 @@ async fn ingest_loop(
                     &frames,
                     &link,
                     &params,
+                    &seed,
                     &mut commands,
                 )
                 .await
@@ -297,6 +307,7 @@ async fn pump(
     frames: &broadcast::Sender<Arc<telemetry::Frame>>,
     link: &LinkStatus,
     params: &EngineParams,
+    seed: &Mutex<Option<Seed>>,
     commands: &mut mpsc::Receiver<server::Command>,
 ) -> Result<()> {
     let mut ingest = Ingest::new(auxiliary_data_type_id);
@@ -387,6 +398,18 @@ async fn pump(
                     }
                     Ok(None) => {}
                     Err(error) => tracing::warn!(%error, "twin lost its estimate, re-seeding"),
+                }
+                // Refreshed only on a frame that carried an estimate, so a
+                // projection is never seeded from a state the filter has since
+                // thrown away. Read back off the frame for the same reason the
+                // lock state below is: the frame is what the estimate was
+                // attached to.
+                if let (Some(output), Some(state)) = (frame.twin.as_ref(), twin.state()) {
+                    *seed.lock().unwrap_or_else(PoisonError::into_inner) = Some(Seed {
+                        t_s: frame.t_s,
+                        state,
+                        theta: output.theta,
+                    });
                 }
             }
             // Read back out of the frame rather than off the twin, so the link
