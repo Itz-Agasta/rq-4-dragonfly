@@ -292,10 +292,18 @@ pub struct Projection {
 /// Pure and synchronous, and it holds a core for the whole horizon. The caller
 /// runs it off the async runtime.
 ///
-/// `horizon_s` is clamped to [`MIN_HORIZON_S`]..=[`MAX_HORIZON_S`].
+/// `horizon_s` is clamped to [`MIN_HORIZON_S`]..=[`MAX_HORIZON_S`]. A non-finite
+/// horizon becomes the minimum rather than propagating: `f64::clamp` returns NaN
+/// for a NaN input, and every derived quantity here is a multiple of the horizon,
+/// so one NaN would reach a browser as a whole projection of them. The HTTP layer
+/// rejects it before this, and this stays total for any other caller.
 #[must_use]
 pub fn project(seed: &Seed, base: &EngineParams, profile: Profile, horizon_s: f64) -> Projection {
-    let horizon_s = horizon_s.clamp(MIN_HORIZON_S, MAX_HORIZON_S);
+    let horizon_s = if horizon_s.is_nan() {
+        MIN_HORIZON_S
+    } else {
+        horizon_s.clamp(MIN_HORIZON_S, MAX_HORIZON_S)
+    };
     let sample_s = horizon_s / SAMPLES as f64;
     let health = Health::from_slice(&seed.theta);
     let params = health.apply(base);
@@ -510,6 +518,35 @@ mod tests {
         let base = engine_model::engines::ae330();
         let p = project(&seed(), &base, Profile::Cruise, 1e9);
         assert!((p.horizon_s - MAX_HORIZON_S).abs() < f64::EPSILON);
+        let p = project(&seed(), &base, Profile::Cruise, f64::INFINITY);
+        assert!((p.horizon_s - MAX_HORIZON_S).abs() < f64::EPSILON);
+        let p = project(&seed(), &base, Profile::Cruise, -1.0);
+        assert!((p.horizon_s - MIN_HORIZON_S).abs() < f64::EPSILON);
+    }
+
+    /// `f64::clamp` passes NaN straight through, and every number in a projection
+    /// is derived from the horizon, so one NaN horizon is a whole projection of
+    /// them on a browser's canvas.
+    #[test]
+    fn a_non_finite_horizon_produces_no_non_finite_numbers() {
+        let base = engine_model::engines::ae330();
+        let p = project(&seed(), &base, Profile::Cruise, f64::NAN);
+
+        assert!(p.horizon_s.is_finite(), "horizon {}", p.horizon_s);
+        assert!(p.sample_s.is_finite(), "sample {}", p.sample_s);
+        assert!(p.speed_x.is_finite(), "speed {}", p.speed_x);
+        assert!(p.fuel_burn_l.is_finite(), "fuel {}", p.fuel_burn_l);
+        assert!(
+            p.t_s.iter().all(|t| t.is_finite()),
+            "a sample time is not finite"
+        );
+        for series in &p.series {
+            assert!(
+                series.values.iter().all(|v| v.is_finite()),
+                "{} carries a non-finite value",
+                series.name
+            );
+        }
     }
 
     #[test]

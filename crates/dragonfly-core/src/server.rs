@@ -376,7 +376,9 @@ pub struct ProjectRequest {
 
 /// Fly the engine the twin currently believes in through a mission profile.
 ///
-/// Answers **409** rather than an empty projection when the twin has no estimate.
+/// Answers **409** rather than an empty projection when the twin has no current
+/// estimate, which covers a filter that discarded one and a bus that has gone
+/// quiet under a filter still holding one.
 /// A projection with no seed would be a healthy engine flying a profile, which is
 /// a simulator run wearing a twin's label, and a screen cannot tell the two apart
 /// from the payload.
@@ -387,6 +389,14 @@ async fn projection(
     let Ok(profile) = project::profile_named(&request.profile) else {
         return (StatusCode::BAD_REQUEST, "not a mission profile").into_response();
     };
+    // `"NaN"` parses as an `f64` and survives a clamp, so it reaches the
+    // projector as a horizon and comes back as a projection of NaN. Rejected
+    // here rather than substituted, because a caller who asked for a horizon
+    // this endpoint cannot read should hear so instead of being handed an
+    // answer to a different question.
+    if !request.hours.is_finite() {
+        return (StatusCode::BAD_REQUEST, "hours must be a finite number").into_response();
+    }
     // Poison is recovered from rather than propagated: what the lock guards is a
     // snapshot copied in and out under it, so a panic elsewhere cannot have left
     // it half written.
@@ -395,11 +405,7 @@ async fn projection(
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let Some(seed) = seed else {
-        return (
-            StatusCode::CONFLICT,
-            "the twin has no estimate to project from",
-        )
-            .into_response();
+        return (StatusCode::CONFLICT, "no current estimate to project from").into_response();
     };
 
     let params = Arc::clone(&state.params);

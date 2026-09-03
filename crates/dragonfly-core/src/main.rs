@@ -270,6 +270,12 @@ async fn ingest_loop(
     // since moved, and re-seeding from the first frame back costs one millisecond.
     let mut backoff = Duration::from_millis(250);
     loop {
+        // The twin is rebuilt per connection, so an estimate never survives a
+        // dropout and the seed taken from it must not either. Cleared before
+        // the socket opens, which covers both a pump that returned and an
+        // interface that will not open at all.
+        *seed.lock().unwrap_or_else(PoisonError::into_inner) = None;
+
         match CanSocket::open(&iface) {
             Ok(socket) => {
                 backoff = Duration::from_millis(250);
@@ -399,13 +405,28 @@ async fn pump(
                     Ok(None) => {}
                     Err(error) => tracing::warn!(%error, "twin lost its estimate, re-seeding"),
                 }
-                // Refreshed only on a frame that carried an estimate, so a
-                // projection is never seeded from a state the filter has since
-                // thrown away. Read back off the frame for the same reason the
-                // lock state below is: the frame is what the estimate was
-                // attached to.
-                if let (Some(output), Some(state)) = (frame.twin.as_ref(), twin.state()) {
-                    *seed.lock().unwrap_or_else(PoisonError::into_inner) = Some(Seed {
+            }
+
+            // The seed is an estimate the twin holds now, taken from a
+            // measurement that is currently fresh, or it is nothing.
+            //
+            // Outside the freshness gate above on purpose, because **a dropped
+            // interface does not error the socket**: the read times out, the loop
+            // keeps producing frames, and the twin keeps its last estimate
+            // indefinitely. Gating only on the filter having discarded its own
+            // therefore misses the ordinary way a bus goes quiet, measured as a
+            // 200 on a live run. A projection seeded from an engine that stopped
+            // being observed is a value rendered without consulting its age.
+            //
+            // An unusable measurement on a live link is not staleness: the filter
+            // still holds its estimate and simply did not advance, so the seed
+            // stands until the link itself goes.
+            {
+                let mut held = seed.lock().unwrap_or_else(PoisonError::into_inner);
+                if !measurement_fresh || !twin.is_seeded() {
+                    *held = None;
+                } else if let (Some(output), Some(state)) = (frame.twin.as_ref(), twin.state()) {
+                    *held = Some(Seed {
                         t_s: frame.t_s,
                         state,
                         theta: output.theta,
