@@ -353,19 +353,9 @@ async fn pump(
         let read = tokio::time::timeout(IDLE_TICK, socket.read_frame()).await;
         let now = Instant::now();
 
-        // A tick's worth of silence *from the engine* is enough to publish, not
-        // only a tick's worth of silence on the whole bus.
-        //
-        // The read timeout alone does not cover this. Any other node publishing
-        // faster than `IDLE_TICK` keeps the read returning, so an engine
-        // controller that stops talking while the auxiliary node carries on
-        // never produces another frame at all: the sequence number freezes, the
-        // link is never marked down, and every readout in the app sits at a live
-        // looking value forever. Measured on a live run at 20 Hz auxiliary, the
-        // sequence stopped dead and `/api/health` went on reporting `link_ok`.
-        //
-        // Costs nothing on a healthy bus, where an engine message every 50 ms
-        // publishes before this deadline is ever reached.
+        // A tick of silence from the engine, not from the whole bus: another node
+        // publishing faster than `IDLE_TICK` starves the read timeout, and a
+        // silent engine would then never publish again. Free on a healthy bus.
         let mut publish = now.duration_since(published) >= IDLE_TICK;
         if let Ok(frame) = read {
             let frame = frame.context("reading a CAN frame")?;
@@ -422,20 +412,9 @@ async fn pump(
                 }
             }
 
-            // The seed is an estimate the twin holds now, taken from a
-            // measurement that is currently fresh, or it is nothing.
-            //
-            // Outside the freshness gate above on purpose, because **a dropped
-            // interface does not error the socket**: the read times out, the loop
-            // keeps producing frames, and the twin keeps its last estimate
-            // indefinitely. Gating only on the filter having discarded its own
-            // therefore misses the ordinary way a bus goes quiet, measured as a
-            // 200 on a live run. A projection seeded from an engine that stopped
-            // being observed is a value rendered without consulting its age.
-            //
-            // An unusable measurement on a live link is not staleness: the filter
-            // still holds its estimate and simply did not advance, so the seed
-            // stands until the link itself goes.
+            // Both halves, because a filter holds its estimate long after anyone
+            // stopped updating it: a quiet bus does not error the read. An
+            // unusable measurement is not staleness, so `Ok(None)` leaves it.
             {
                 let mut held = seed.lock().unwrap_or_else(PoisonError::into_inner);
                 if !measurement_fresh || !twin.is_seeded() {

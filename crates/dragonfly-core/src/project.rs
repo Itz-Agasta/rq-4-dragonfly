@@ -1,17 +1,13 @@
 //! Flying the engine the twin currently believes in through the rest of a mission.
 //!
-//! This is the model run forward, never the filter. A filter stepped at a
-//! compressed time base reads its own compression as a violent transient: the
-//! covariance inflation pins at its ceiling, every sigma is multiplied, and the
-//! answer is a residual band rather than a trajectory. The filter's only job here
-//! is to supply the starting point, which is why a [`Seed`] is a state and a set
-//! of health parameters and nothing else.
+//! The model run forward, never the filter: a filter stepped at a compressed time
+//! base reads its own compression as a violent transient and answers with a
+//! residual band rather than a trajectory. **Health is frozen at the seed**, so
+//! this says what a leg does to the engine as it is now, not how it wears.
 //!
-//! **Measured at 2,062x real time** on the reference machine: one hour of mission
-//! in 1.75 s, at the model's mandatory 200 Hz sub-step. Nothing here coarsens that
-//! step to go faster. The turbocharger shaft is the stiff state and a step sized
-//! to the sampling interval walks straight past its dynamics, which would produce
-//! a boost trace that is smooth, plausible and wrong.
+//! **Measured at 2,062x real time**, at the mandatory 200 Hz sub-step. Nothing
+//! coarsens that step: the turbo shaft is the stiff state, and a step sized to the
+//! sampling interval draws a boost trace that is smooth and wrong.
 
 use dragonfly_sim::{mission::Profile, plant::Plant};
 use engine_model::{EngineParams, Outputs, State, params::Limits};
@@ -27,18 +23,14 @@ const SAMPLES: usize = 720;
 
 /// Seconds the controllers are settled for before sampling starts.
 ///
-/// A [`Seed`] carries the engine's state and nothing about the controllers around
-/// it, because the filter does not estimate them: the wastegate is a measured
-/// input and the governor is not modelled at all. A fresh [`Plant`] starts its
-/// boost controller and its propeller governor at their defaults, so without this
-/// the first samples are those two converging on an operating point the engine is
-/// already at, and every channel opens with a step that did not happen.
+/// The filter estimates neither the wastegate nor the governor, so a fresh
+/// [`Plant`] starts both at their defaults and every channel opens with a step
+/// that did not happen.
 ///
-/// **The settled state is kept, not reset back to the seed.** Resetting reinstates
-/// the step: the controller has by then found the manifold pressure its own model
-/// holds, so re-imposing the filter's value only means it pulls away again, and
-/// the step draws model-plant mismatch as an engine transient. The leg therefore
-/// begins this many seconds in, which every horizon here rounds away.
+/// **The settled state is kept, not reset back to the seed.** Re-imposing the
+/// filter's value after the controller has found its own draws model-plant
+/// mismatch as an engine transient. The leg begins this many seconds in, which
+/// every horizon here rounds away.
 const SETTLE_S: f64 = 20.0;
 
 /// Shortest and longest horizon the endpoint will run.
@@ -292,11 +284,10 @@ pub struct Projection {
 /// Pure and synchronous, and it holds a core for the whole horizon. The caller
 /// runs it off the async runtime.
 ///
-/// `horizon_s` is clamped to [`MIN_HORIZON_S`]..=[`MAX_HORIZON_S`]. A non-finite
-/// horizon becomes the minimum rather than propagating: `f64::clamp` returns NaN
-/// for a NaN input, and every derived quantity here is a multiple of the horizon,
-/// so one NaN would reach a browser as a whole projection of them. The HTTP layer
-/// rejects it before this, and this stays total for any other caller.
+/// `horizon_s` is clamped to [`MIN_HORIZON_S`]..=[`MAX_HORIZON_S`], and a
+/// non-finite one becomes the minimum: `f64::clamp` passes NaN through, and every
+/// number here is a multiple of the horizon. The HTTP layer rejects it earlier;
+/// this stays total for any other caller.
 #[must_use]
 pub fn project(seed: &Seed, base: &EngineParams, profile: Profile, horizon_s: f64) -> Projection {
     let horizon_s = if horizon_s.is_nan() {

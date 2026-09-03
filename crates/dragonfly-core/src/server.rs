@@ -389,11 +389,9 @@ async fn projection(
     let Ok(profile) = project::profile_named(&request.profile) else {
         return (StatusCode::BAD_REQUEST, "not a mission profile").into_response();
     };
-    // `"NaN"` parses as an `f64` and survives a clamp, so it reaches the
-    // projector as a horizon and comes back as a projection of NaN. Rejected
-    // here rather than substituted, because a caller who asked for a horizon
-    // this endpoint cannot read should hear so instead of being handed an
-    // answer to a different question.
+    // `"NaN"` parses as an `f64` and survives `clamp`. Rejected rather than
+    // substituted: a caller asking for a horizon this cannot read should hear
+    // so, not be handed the answer to a different question.
     if !request.hours.is_finite() {
         return (StatusCode::BAD_REQUEST, "hours must be a finite number").into_response();
     }
