@@ -412,6 +412,11 @@ impl<'a> Columns<'a> {
                 posterior: std::array::from_fn(|h| self.f(&format!("posterior_{h}"), row)),
                 match_score: [f64::NAN; HYPOTHESES],
                 best: self.u32("diagnosis_best", row) as usize,
+                // A recording stores the winner and not the fit, so a replayed
+                // frame cannot say whether the library explained it. False rather
+                // than a guess: `unexplained` suppresses a name, and inventing one
+                // here would suppress names on recordings that were fine.
+                unexplained: false,
                 rejection: [""; HYPOTHESES],
             },
         })

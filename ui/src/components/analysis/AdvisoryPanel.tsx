@@ -33,7 +33,8 @@ export function AdvisoryPanel() {
     // zero reads an absent estimate as the nominal row, and the panel then clears
     // an engine no estimator has looked at yet.
     const diagnosed = twin !== null && isFresh(frame.ages.engine_ms);
-    const task = diagnosed ? TASKS[twin.diagnosis.best] : null;
+    // See `ops/Advisory`: a ranking that does not fit must not become a repair.
+    const task = diagnosed && !twin.diagnosis.unexplained ? TASKS[twin.diagnosis.best] : null;
 
     if (action.current) {
       const degraded = diagnosed ? degradedNote(twin.health, twin.ever_locked) : null;

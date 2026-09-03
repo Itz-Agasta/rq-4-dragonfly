@@ -55,15 +55,22 @@ export function Advisory() {
     const diagnosed = twin !== null && isFresh(frame.ages.engine_ms);
 
     if (diagnosis.current) {
-      diagnosis.current.textContent = diagnosed
-        ? (HYPOTHESES[twin.diagnosis.best] ?? NO_VALUE)
-        : WAITING;
+      diagnosis.current.textContent = !diagnosed
+        ? WAITING
+        : twin.diagnosis.unexplained
+          ? "NO LIBRARY MATCH"
+          : (HYPOTHESES[twin.diagnosis.best] ?? NO_VALUE);
     }
     if (confidence.current) {
-      const posterior = diagnosed ? twin.diagnosis.posterior[twin.diagnosis.best] : undefined;
+      const posterior =
+        diagnosed && !twin.diagnosis.unexplained
+          ? twin.diagnosis.posterior[twin.diagnosis.best]
+          : undefined;
       confidence.current.textContent =
         posterior === undefined
-          ? ""
+          ? diagnosed && twin.diagnosis.unexplained
+            ? "no signature fits this residual"
+            : ""
           : `confidence ${posteriorPct(posterior, twin?.diagnosis.best === 0)}%`;
     }
 
@@ -87,7 +94,11 @@ export function Advisory() {
           : `${subsystem} · p10 ${fmt(rul?.p10 ?? Number.NaN, 2)} h`;
     }
 
-    const task = diagnosed ? TASKS[twin.diagnosis.best] : null;
+    // No task when nothing fits. The advisory then falls to `degradedNote`, which
+    // names the subsystem the rail is already showing rather than a repair on a
+    // cylinder the catalogue guessed: commanded on cylinder 2, this panel told a
+    // maintainer to replace injector 3.
+    const task = diagnosed && !twin.diagnosis.unexplained ? TASKS[twin.diagnosis.best] : null;
     if (action.current) {
       const degraded = diagnosed ? degradedNote(twin.health, twin.ever_locked) : null;
       action.current.textContent = task

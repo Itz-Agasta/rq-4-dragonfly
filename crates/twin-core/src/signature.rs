@@ -39,6 +39,20 @@ const SETTLE_MAX_S: f64 = 600.0;
 /// one extra parameter: a fault has to beat the null at 95% before it is preferred.
 const SEVERITY_PENALTY: f64 = 1.921;
 
+/// Cosine below which the library does not explain the residual at all.
+///
+/// The posterior is a softmax over the library and therefore always sums to one:
+/// asked about a fault it does not carry, it returns the best of a bad set at high
+/// confidence. Measured on injector coking commanded from the drawer, where the
+/// catalogue holds cylinder 3 only: cylinder 2 came back `INJECTOR 3 COKING` at
+/// 92.7% on a cosine of 0.210, cylinder 4 at 86.4% on 0.194, and the advisory told
+/// a maintainer to replace the wrong injector. A true match scores 0.99 and even a
+/// genuinely confusable neighbour, misfire against coking on the same cylinder,
+/// scores 0.94, so half separates the two cases with room either side.
+///
+/// The cosine is the fit; the posterior is only the ranking. This gates on the fit.
+const MATCH_FLOOR: f64 = 0.5;
+
 /// One fault hypothesis.
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct Hypothesis {
@@ -179,6 +193,13 @@ pub struct Diagnosis {
     /// to one. This is the match score a matrix row is sorted by, and it is
     /// independent of how severe the fault is.
     pub match_score: [f64; HYPOTHESES],
+    /// Whether the winner explains the residual at all.
+    ///
+    /// True when detection has fired and the best signature still fits badly, which
+    /// is the library being asked about a fault it does not carry. A caller must
+    /// not name `best` or act on it while this is set: the ranking is real and the
+    /// explanation is not.
+    pub unexplained: bool,
     /// Index of the most probable hypothesis.
     pub best: usize,
     /// Why each runner-up was rejected, in the words a row label needs.
@@ -271,10 +292,16 @@ impl Signatures {
             .max_by(|a, b| posterior[*a].total_cmp(&posterior[*b]))
             .unwrap_or(NOMINAL);
 
+        // `best` is kept as the ranking even when nothing fits, so the matrix still
+        // has a row to compare `OBSERVED NOW` against. What changes is whether a
+        // caller may name it.
+        let unexplained = detected && best != NOMINAL && match_score[best] < MATCH_FLOOR;
+
         Diagnosis {
             posterior,
             match_score,
             best,
+            unexplained,
             rejection: std::array::from_fn(|h| self.reject(h, best, severity[h], normalised)),
         }
     }
@@ -434,7 +461,7 @@ pub fn catalogue() -> [Hypothesis; HYPOTHESES] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use engine_model::engines;
+    use engine_model::{CYLINDERS, engines};
 
     fn built() -> Signatures {
         Signatures::generate(&engines::ae330())
@@ -579,6 +606,46 @@ mod tests {
             ungated.best, NOMINAL,
             "noise was diagnosed as {}",
             CATALOGUE[ungated.best].0.name
+        );
+    }
+
+    /// A fault the library does not carry must not be named as one it does.
+    ///
+    /// The softmax always sums to one, so it ranks confidently whatever it is shown.
+    /// This is the guard that stops the ranking being read as an explanation.
+    #[test]
+    fn a_residual_the_library_cannot_explain_is_marked_unexplained() {
+        let s = built();
+        let coking = 1;
+
+        // Scaled to a fully developed fault, which is where the failure showed:
+        // the rotation below then reproduces the measured cosine of 0.210 exactly,
+        // because it is the same geometry the engine produced.
+        let mut z = [0.0; CHANNELS];
+        for (i, v) in z.iter_mut().enumerate() {
+            *v = s.rows[coking][i] * 16.0;
+        }
+        let good = s.diagnose(&z, true);
+        assert!(
+            !good.unexplained,
+            "its own signature scored {}",
+            good.match_score[good.best]
+        );
+
+        // The same fault on a cylinder the catalogue does not carry, built by
+        // rotating the per-cylinder block of the signature it does. This is the
+        // shape the drawer produced on cylinders 2 and 4, not an invented one.
+        let mut moved = z;
+        for block in [ch::EGT, ch::CHT, ch::LAMBDA] {
+            for c in 0..CYLINDERS {
+                moved[block + c] = z[block + (c + 1) % CYLINDERS];
+            }
+        }
+        let bad = s.diagnose(&moved, true);
+        assert!(
+            bad.unexplained,
+            "a fault on another cylinder was named {} at a match of {}",
+            bad.best, bad.match_score[bad.best]
         );
     }
 

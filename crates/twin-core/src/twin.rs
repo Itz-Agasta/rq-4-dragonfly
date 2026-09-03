@@ -709,6 +709,7 @@ fn blank_output() -> TwinOutput {
             },
             match_score: [0.0; crate::signature::HYPOTHESES],
             best: crate::signature::NOMINAL,
+            unexplained: false,
             rejection: [""; crate::signature::HYPOTHESES],
         },
         health: [f64::NAN; INDICES],

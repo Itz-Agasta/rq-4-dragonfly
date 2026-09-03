@@ -61,21 +61,35 @@ export function Hypotheses({ data }: { data: Matrix }) {
     }
 
     const best = diagnosis.best;
+    const unexplained = diagnosis.unexplained;
     const posterior = diagnosis.posterior[best] ?? 0;
-    if (headline.current) headline.current.textContent = data.hypotheses[best];
-    if (percent.current) percent.current.textContent = `${posteriorPct(posterior, best === 0)}%`;
-    if (bar.current) bar.current.style.width = `${Math.round(posterior * 100)}%`;
+    // The ranking still names a row, because the matrix below needs one to compare
+    // `OBSERVED NOW` against. The headline must not repeat it: the softmax is a
+    // ranking over the library and says nothing about whether the library applies.
+    if (headline.current) {
+      headline.current.textContent = unexplained ? "NO LIBRARY MATCH" : data.hypotheses[best];
+    }
+    if (percent.current) {
+      percent.current.textContent = unexplained
+        ? NO_VALUE
+        : `${posteriorPct(posterior, best === 0)}%`;
+    }
+    if (bar.current)
+      bar.current.style.width = unexplained ? "0%" : `${Math.round(posterior * 100)}%`;
     if (kind.current) {
-      kind.current.textContent = data.instrument[best]
-        ? "instrument · distrust the reading, not the engine"
-        : best === 0
-          ? "no fault found"
-          : "engine";
+      kind.current.textContent = unexplained
+        ? "detected, not isolated · the rail names the parameter"
+        : data.instrument[best]
+          ? "instrument · distrust the reading, not the engine"
+          : best === 0
+            ? "no fault found"
+            : "engine";
     }
     if (evidence.current) {
       const score = diagnosis.match_score[best];
-      evidence.current.textContent =
-        best === 0
+      evidence.current.textContent = unexplained
+        ? `closest signature fits at only ${fmt(score, 3)}; a real match scores above 0.9`
+        : best === 0
           ? "residual is inside the band on every channel"
           : `residual pattern matches this signature at ${fmt(score, 3)}`;
     }

@@ -185,6 +185,14 @@ export interface Diagnosis {
   match_score: number[];
   /** Index of the most probable hypothesis. */
   best: number;
+  /**
+   * Whether the winner explains the residual at all.
+   *
+   * The posterior is a softmax over the library, so it ranks confidently whatever
+   * it is shown. When this is set the ranking is real and the explanation is not:
+   * do not name `best` and do not act on it.
+   */
+  unexplained: boolean;
   /** Channel that rejected each runner-up, empty for the winner and the null. */
   rejection: string[];
 }
