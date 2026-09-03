@@ -61,7 +61,14 @@ ui:
 build-ui:
     pnpm -F ui build
 
-kiosk:
+# `just ui` is the dev server on :5173; this is the bundle a judge sees, and the
+# two are not the same artefact. `ui/dist` is gitignored, so on a fresh clone the
+# core serves nothing until build-ui has run, and the failure mode is a blank
+# screen rather than an error: hence the dependency, not an ordering note in a
+# document nobody opens at demo time.
+
+# the demo path: build the frontend, then full-screen it against the core
+kiosk: build-ui
     chromium --app=http://127.0.0.1:8787 --start-fullscreen
 
 # prove frames are actually on the wire. the D5 acceptance test.
