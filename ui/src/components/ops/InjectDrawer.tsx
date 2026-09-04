@@ -80,10 +80,13 @@ const PRESETS: readonly Preset[] = [
   {
     kind: KIND.coking,
     label: "Injector coking",
-    note: "nozzle to 72% of nominal flow over 2 min",
+    note: "nozzle to 72% of nominal flow over 30 min",
     perCylinder: true,
     severity: 0.72,
-    ramp_s: 120,
+    // Must outlast the demonstration. A ramp that settles inside it leaves the
+    // parameter constant, so there is no decline to fit and the remaining life
+    // vanishes mid-run. Detection does not pay for the slower ramp; handover 9.4.
+    ramp_s: 1800,
   },
   {
     kind: KIND.misfire,
