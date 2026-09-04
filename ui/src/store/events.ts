@@ -116,6 +116,19 @@ export class EventLog {
     this.version += 1;
   }
 
+  /**
+   * Stamp an already raised alert with the time its condition went away.
+   *
+   * Set once. A channel that leaves the band again raises a fresh event under a
+   * fresh id, so a second episode never reopens the first row.
+   */
+  private standDown(id: string, t_s: number): void {
+    const i = this.alerts.findIndex((a) => a.id === id && a.returned_s === undefined);
+    if (i < 0) return;
+    this.alerts = this.alerts.with(i, { ...this.alerts[i]!, returned_s: t_s });
+    this.version += 1;
+  }
+
   private reset(): void {
     this.alerts = [];
     this.episodes.clear();
@@ -159,7 +172,13 @@ export class EventLog {
   /** The CUSUM, which is the detector that catches a slow degradation. */
   private drift(frame: Frame): void {
     const d = frame.twin?.detection;
-    if (!d || !d.drift || d.drift_since === null) return;
+    if (!d || d.drift_since === null) return;
+    // `drift_since` is latched for the life of the twin, so the alarm standing
+    // down is `drift` going false and never the stamp moving.
+    if (!d.drift) {
+      this.standDown(`${d.cusum_channel || "DETECTOR"}:${Math.round(d.drift_since)}`, frame.t_s);
+      return;
+    }
     this.raise(
       event(
         d.drift_since,
@@ -231,6 +250,9 @@ export class EventLog {
       } else if (magnitude < CLEAR_SIGMA) {
         if (episode.returned === null) episode.returned = frame.t_s;
         if (frame.t_s - episode.returned >= CLEAR_S) {
+          if (episode.since !== null) {
+            this.standDown(`${COMPARED[i]!.name}:${Math.round(episode.since)}`, frame.t_s);
+          }
           episode.since = null;
           episode.raised = false;
           episode.returned = null;

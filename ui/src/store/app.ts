@@ -27,6 +27,13 @@ export interface Alert {
   message: string;
   /** Screen that can explain it. Drives the rail's unacknowledged marker. */
   screen: ScreenId;
+  /**
+   * Mission time the condition went away, `undefined` while it is still present.
+   *
+   * Independent of acknowledgement, and both are needed: the row stays until an
+   * operator acks it, but without this it reads as a live alarm forever.
+   */
+  returned_s?: number;
 }
 
 /**

@@ -23,7 +23,11 @@ function Row({ alert, acked }: { alert: Alert; acked: boolean }) {
   const acknowledge = useApp((s) => s.acknowledge);
   const select = useApp((s) => s.select);
   const navigate = useNavigate();
-  const live = alert.severity === "caution" && !acked;
+  // Three states, not two: a caution whose condition went away loses the accent
+  // but keeps its ACK, because an alarm that retired itself unseen is the
+  // failure the stack exists to prevent.
+  const open = alert.severity === "caution" && !acked;
+  const live = open && alert.returned_s === undefined;
 
   return (
     <div className="border-border relative border-b py-[10px] pr-4 pl-[14px] last:border-b-0">
@@ -40,6 +44,11 @@ function Row({ alert, acked }: { alert: Alert; acked: boolean }) {
           {alert.severity === "caution" ? "CAUTION" : "ADVISORY"} · {acked ? "ACK" : "UNACK"}
         </span>
       </div>
+      {alert.returned_s !== undefined ? (
+        <div className="text-foreground-dim text-[11px]">
+          RETURNED {missionClock(alert.returned_s)}
+        </div>
+      ) : null}
       <div
         className={`mt-[5px] text-[12px] tracking-[0.04em] ${
           live ? "text-primary" : "text-muted-foreground"
@@ -54,7 +63,7 @@ function Row({ alert, acked }: { alert: Alert; acked: boolean }) {
       >
         {alert.message}
       </div>
-      {live ? (
+      {open ? (
         <div className="mt-2 flex gap-2">
           <Button size="sm" onClick={() => acknowledge(alert.id)}>
             ACK
