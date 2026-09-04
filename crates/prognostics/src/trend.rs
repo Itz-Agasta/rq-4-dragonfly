@@ -43,15 +43,13 @@ const MINIMUM: usize = 300;
 /// One parameter's trend.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Trend {
-    /// Current value, from the fitted line rather than the last sample, so a single
-    /// noisy frame cannot move a remaining-life estimate.
-    pub value: f64,
     /// Rate of change, per second. Negative for a parameter that is degrading.
     pub slope: f64,
     /// One standard deviation of the slope, per second, including the slope a
     /// random walk of the filter's own process noise would manufacture on its own.
     pub slope_sigma: f64,
-    /// One standard deviation of the fitted current value.
+    /// One standard deviation of the fitted line at the newest sample. Stands in
+    /// for the uncertainty on the live estimate a projection starts from.
     pub value_sigma: f64,
     /// Seconds the fit spans. Zero until there is enough to fit.
     pub span_s: f64,
@@ -90,13 +88,28 @@ impl Ring {
     /// Centring is what keeps the normal equations well conditioned: uncentred, the
     /// determinant is a difference between two numbers of order `t^2` and loses most
     /// of its significant digits after an hour of mission time.
+    ///
+    /// **Samples are copied out in time order first.** Least squares is
+    /// indifferent to the order of its pairs, but [`walk_step`] differences
+    /// `y[k]` against `y[k - lag]`, and across the ring's wrap that differences
+    /// the newest sample against the oldest, manufacturing a walk the size of
+    /// the window. Left in ring order, a decline stops being significant exactly
+    /// `WINDOW` seconds after it starts.
     fn fit(&self) -> Trend {
         if self.len < MINIMUM {
             return Trend::default();
         }
         let n = self.len as f64;
-        let t = &self.t[..self.len];
-        let y = &self.y[..self.len];
+        let oldest = if self.len < WINDOW { 0 } else { self.cursor };
+        let mut ordered_t = Vec::with_capacity(self.len);
+        let mut ordered_y = Vec::with_capacity(self.len);
+        for k in 0..self.len {
+            let j = (oldest + k) % WINDOW;
+            ordered_t.push(self.t[j]);
+            ordered_y.push(self.y[j]);
+        }
+        let t = &ordered_t[..];
+        let y = &ordered_y[..];
 
         let t_mean = t.iter().sum::<f64>() / n;
         let y_mean = y.iter().sum::<f64>() / n;
@@ -120,7 +133,7 @@ impl Ring {
             residual += (yi - predicted).powi(2);
         }
         let variance = residual / (n - 2.0);
-        let latest = t[(self.cursor + WINDOW - 1) % WINDOW];
+        let latest = t[self.len - 1];
         // Two independent reasons the slope could be wrong, added in quadrature:
         // the scatter about the line, and the slope a parameter doing nothing but
         // the wandering the filter permits would produce anyway.
@@ -128,13 +141,12 @@ impl Ring {
         let from_walk = walk_slope_variance(t, t_mean, stt, walk_step(y));
 
         Trend {
-            value: slope.mul_add(latest - t_mean, y_mean),
             slope,
             slope_sigma: (from_scatter + from_walk).sqrt(),
             // The fitted value's variance at the end of the window, which is where
             // the extrapolation starts and where the line is least well known.
             value_sigma: (variance * (1.0 / n + (latest - t_mean).powi(2) / stt)).sqrt(),
-            span_s: latest - t[if self.len < WINDOW { 0 } else { self.cursor }],
+            span_s: latest - t[0],
             ready: true,
         }
     }
@@ -215,6 +227,7 @@ pub struct Trends {
     rings: Vec<Ring>,
     next_sample_s: f64,
     fitted: [Trend; PARAMS],
+    latest: [f64; PARAMS],
 }
 
 impl Default for Trends {
@@ -231,6 +244,7 @@ impl Trends {
             rings: (0..PARAMS).map(|_| Ring::new()).collect(),
             next_sample_s: f64::NEG_INFINITY,
             fitted: [Trend::default(); PARAMS],
+            latest: std::array::from_fn(|i| DESCRIPTORS[i].nominal),
         }
     }
 
@@ -239,6 +253,9 @@ impl Trends {
     /// Cheap on the frames it discards, which is nineteen in twenty, so this sits
     /// in the ingest loop without a thread.
     pub fn observe(&mut self, t_s: f64, theta: &[f64; PARAMS]) {
+        // Kept before the decimation gate, so the value a projection starts from
+        // is the filter's current one and not one up to a second old.
+        self.latest = *theta;
         if t_s < self.next_sample_s {
             return;
         }
@@ -259,6 +276,23 @@ impl Trends {
     pub fn get(&self, i: usize) -> &Trend {
         assert!(i < PARAMS, "no parameter {i}");
         &self.fitted[i]
+    }
+
+    /// The filter's current estimate of one parameter, nominal until one arrives.
+    ///
+    /// **A projection starts here and takes only its rate from the fit.** The
+    /// fitted line at the newest sample is the better answer only while the series
+    /// is straight; through a transient it undershoots by about a quarter of the
+    /// step it is crossing, which is enough to put a projection below a threshold
+    /// the parameter is still clear of. A `value` field on [`Trend`] was removed
+    /// for that reason and must not come back.
+    ///
+    /// # Panics
+    /// If `i` is not a parameter index.
+    #[must_use]
+    pub fn value(&self, i: usize) -> f64 {
+        assert!(i < PARAMS, "no parameter {i}");
+        self.latest[i]
     }
 
     /// Whether a parameter is degrading rather than wandering, at 99% confidence.
@@ -322,15 +356,14 @@ mod tests {
         assert!(fit.slope_sigma < 1e-9, "{}", fit.slope_sigma);
     }
 
-    /// The fitted value is the line at the newest sample, not the mean of the
-    /// window, or every extrapolation starts fifteen minutes in the past.
+    /// A projection starts from the filter's current estimate, and it must be the
+    /// live one rather than anything the ring decimated or the line smoothed.
     #[test]
-    fn the_reported_value_is_where_the_line_is_now() {
+    fn the_reported_value_is_the_filters_own_latest() {
         let mut t = Trends::new();
         ramp(&mut t, 900, 1.0, -0.36, 0.0);
-        let fit = t.get(th::INJECTOR + 2);
         // 900 s at 0.36 per hour is 0.09 consumed.
-        assert!((fit.value - 0.91).abs() < 1e-3, "{}", fit.value);
+        assert!((t.value(th::INJECTOR + 2) - 0.91).abs() < 1e-3);
     }
 
     /// Noise has to widen the slope's own error bar, or the interval on the
@@ -409,6 +442,29 @@ mod tests {
         let mut t = Trends::new();
         ramp(&mut t, 900, 0.90, 0.02, 0.001);
         assert!(!t.is_degrading(th::INJECTOR + 2));
+    }
+
+    /// A decline must survive the ring wrapping, which is the case a mission longer
+    /// than the window is entirely made of.
+    ///
+    /// The inflated walk scales with the slope, so the significance ratio sits at
+    /// 1.5 whatever the rate and no decline is ever called again. The slope itself
+    /// is unharmed, which is why only `is_degrading` catches this.
+    ///
+    /// **The span must not be a multiple of [`WINDOW`]**, or the cursor lands back
+    /// on zero, the ring reads in order by luck and this passes against the bug.
+    #[test]
+    fn a_decline_survives_the_window_wrapping() {
+        let i = th::INJECTOR + 2;
+        let mut t = Trends::new();
+        ramp(&mut t, WINDOW + WINDOW / 2, 0.966, -0.02, 0.0005);
+        assert!(t.get(i).ready);
+        assert!(
+            t.is_degrading(i),
+            "slope {} per hour, sigma {} per hour",
+            t.get(i).slope * 3600.0,
+            t.get(i).slope_sigma * 3600.0
+        );
     }
 
     /// The ring must wrap without the fit noticing, and the span must stop growing
