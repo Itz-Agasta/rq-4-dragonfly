@@ -25,6 +25,15 @@ const CUSUM_SLACK: f64 = 0.5;
 /// Decision interval. The accumulated excursion at which a channel has drifted.
 const CUSUM_LIMIT: f64 = 5.0;
 
+/// Ceiling on either accumulator.
+///
+/// Unbounded, the time to stand down grows with how long the fault ran: a channel
+/// held at 4.8 sigma takes 86 units a second and sheds [`CUSUM_SLACK`]'s 10, so
+/// five minutes of fault buys forty of a healthy engine still reading DRIFT. The
+/// alarm is `worst > CUSUM_LIMIT` and nothing reads the excess, so capping costs
+/// no sensitivity; five intervals stands down in 2.5 s at 20 Hz.
+const CUSUM_CEILING: f64 = 5.0 * CUSUM_LIMIT;
+
 /// Seconds averaged into the per-channel baseline before the CUSUM runs.
 ///
 /// The residual against a healthy engine is **not zero-mean**: model-plant mismatch
@@ -63,6 +72,10 @@ pub struct Detection {
     /// Whether some channel has drifted persistently.
     pub drift: bool,
     /// Time the drift alarm first latched, s. `None` until it does.
+    ///
+    /// Latched for the life of the twin, unlike [`Detection::drift`]. It is one
+    /// half of [`Detection::lead_time_s`], and a stamp that moved would shrink a
+    /// lead time already reported.
     pub drift_since: Option<f64>,
     /// Time the conventional redline monitor first tripped, s.
     pub redline_since: Option<f64>,
@@ -182,8 +195,8 @@ impl Detector {
                 continue;
             }
             let centred = z - bias;
-            *high = (*high + centred - CUSUM_SLACK).max(0.0);
-            *low = (*low - centred - CUSUM_SLACK).max(0.0);
+            *high = (*high + centred - CUSUM_SLACK).clamp(0.0, CUSUM_CEILING);
+            *low = (*low - centred - CUSUM_SLACK).clamp(0.0, CUSUM_CEILING);
             let excursion = high.max(*low);
             if excursion > worst {
                 worst = excursion;
@@ -192,8 +205,8 @@ impl Detector {
         }
 
         let drift = worst > CUSUM_LIMIT;
-        if drift && self.drift_since.is_none() {
-            self.drift_since = Some(t_s);
+        if drift {
+            self.drift_since.get_or_insert(t_s);
         }
 
         if self.redline_since.is_none()
@@ -558,6 +571,31 @@ mod tests {
         let rb = feed(&mut b, 20, &down);
         assert!((ra.cusum - rb.cusum).abs() < 1e-12);
         assert!(rb.drift);
+    }
+
+    /// Standing down has to cost seconds, not the length of the fault.
+    ///
+    /// Without [`CUSUM_CEILING`] the accumulator carries every unit it ever took,
+    /// so this passes only once the healthy stretch outlasts the faulted one.
+    #[test]
+    fn a_cleared_fault_stands_the_alarm_down_in_seconds() {
+        let mut z = [0.0; CHANNELS];
+        // The severity the coked injector holds LAMBDA 3 at, measured.
+        z[ch::EGT + 2] = -4.8;
+        let mut d = calibrated();
+
+        let out = feed(&mut d, 6_000, &z);
+        assert!(out.drift);
+
+        // Ceiling over slack is 50 frames, 2.5 s at 20 Hz.
+        let out = feed(&mut d, 50, &[0.0; CHANNELS]);
+        assert!(
+            !out.drift,
+            "cusum {} after five minutes of fault",
+            out.cusum
+        );
+        // The stamp outlives the episode on purpose: it is half a lead time.
+        assert!(out.drift_since.is_some());
     }
 
     /// A step large enough to be an outlier has to be caught by the distance test

@@ -97,7 +97,7 @@ pub struct Prognosis {
 #[must_use]
 pub fn evaluate(trends: &Trends) -> Prognosis {
     let parameter: [Rul; PARAMS] =
-        std::array::from_fn(|i| project(i, trends.get(i), trends.is_degrading(i)));
+        std::array::from_fn(|i| project(i, trends.value(i), trends.get(i), trends.is_degrading(i)));
 
     let subsystem: [Rul; INDICES] = std::array::from_fn(|s| soonest(MEMBERS[s], &parameter));
 
@@ -126,15 +126,20 @@ pub fn evaluate(trends: &Trends) -> Prognosis {
 /// the threshold and the rate is the negated slope. A parameter already past its
 /// threshold reports zero rather than a negative life, because "overdue" and "three
 /// hours ago" are the same operational statement and only one of them is readable.
-fn project(i: usize, trend: &Trend, degrading: bool) -> Rul {
+///
+/// **`value` is the filter's live estimate; the fit supplies the rate only.** The
+/// trajectory chart labels that same estimate, so anchoring anywhere else prints a
+/// life the plot beneath it contradicts. `Trends::value` carries the measurement.
+fn project(i: usize, value: f64, trend: &Trend, degrading: bool) -> Rul {
     let d = &DESCRIPTORS[i];
     let mut out = Rul {
         driver: d.name,
-        consumed: ((d.nominal - trend.value) / (d.nominal - d.failure)).max(0.0),
+        consumed: ((d.nominal - value) / (d.nominal - d.failure)).max(0.0),
         ..Rul::default()
     };
+    // `consumed` stands whether or not there is a fit: it is the live estimate
+    // against two constants. Only the projection needs a slope.
     if !trend.ready {
-        out.consumed = 0.0;
         return out;
     }
     out.fit_span_s = trend.span_s;
@@ -144,7 +149,7 @@ fn project(i: usize, trend: &Trend, degrading: bool) -> Rul {
 
     let rate = -trend.slope;
     out.rate_per_hour = rate * 3600.0;
-    let distance = trend.value - d.failure;
+    let distance = value - d.failure;
     if distance <= 0.0 {
         out.hours = Some(0.0);
         out.p10 = Some(0.0);
@@ -284,6 +289,17 @@ mod tests {
         assert_eq!(fuel.driver, "injector-2 Cd");
         assert_eq!(p.limiting, Some(sub::FUEL));
         assert!(fuel.hours.unwrap() < 6.0, "{:?}", fuel.hours);
+    }
+
+    /// `consumed` has to stand before there is a fit, because the trajectory panel
+    /// ranks parameters by it to decide which one to draw. Zeroed, every entry ties
+    /// and the panel names parameter 0 whatever the engine is doing.
+    #[test]
+    fn wear_is_reported_before_the_trend_window_has_filled() {
+        let i = th::INJECTOR + 2;
+        let p = evaluate(&declining(i, 0.80, -0.02, 60, 0.0)).parameter[i];
+        assert!(p.hours.is_none(), "60 s is not enough to fit");
+        assert!(p.consumed > 0.4, "{}", p.consumed);
     }
 
     /// A parameter already past its threshold is overdue, not negative.
