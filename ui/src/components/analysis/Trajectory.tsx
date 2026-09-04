@@ -149,12 +149,15 @@ export function Trajectory({ parameters }: { parameters: Parameter[] }) {
     rail(top.current, descriptor.nominal);
     rail(value.current, current);
     rail(failLabel.current, descriptor.failure);
-    // On a healthy engine the current value sits on nominal and the two labels
-    // land on top of each other. The live one wins; the axis top is the less
-    // useful of the two and is already implied by where the trace starts.
+    // A healthy value sits on nominal and a spent one sits on the threshold, so
+    // either axis label can land under the live one. The live one wins: both
+    // axis labels name a line that is drawn anyway.
+    const collides = (v: number) => Math.abs(y(v) - y(current)) < BOX * 0.07;
     if (top.current) {
-      const collides = Math.abs(y(descriptor.nominal) - y(current)) < BOX * 0.07;
-      top.current.style.visibility = collides ? "hidden" : "visible";
+      top.current.style.visibility = collides(descriptor.nominal) ? "hidden" : "visible";
+    }
+    if (failLabel.current) {
+      failLabel.current.style.visibility = collides(descriptor.failure) ? "hidden" : "visible";
     }
     const xNow = x(tNow);
     if (now.current) {
@@ -162,7 +165,9 @@ export function Trajectory({ parameters }: { parameters: Parameter[] }) {
       now.current.setAttribute("x2", xNow.toFixed(1));
     }
 
-    if (left.current) left.current.textContent = `−${fmt(backS / 60, 0)} min`;
+    // Rounded up, never down: a window shorter than half a minute is a real span
+    // of history and `−0 min` reads as a broken axis.
+    if (left.current) left.current.textContent = `−${fmt(Math.ceil(backS / 60), 0)} min`;
     if (middle.current) middle.current.textContent = missionClock(tNow);
 
     if (hours === null || aheadS === 0) {

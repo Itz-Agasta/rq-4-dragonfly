@@ -18,9 +18,6 @@ import { fmt, missionClock, NO_VALUE } from "@/lib/fmt";
 import { useLiveSink } from "@/lib/live";
 import { isFresh } from "@/lib/telemetry";
 
-// Widest the readout can grow without reflowing the detector strip.
-const CUSUM_DISPLAY_MAX = 9999;
-
 export function DetectionBar() {
   const state = useRef<HTMLSpanElement>(null);
   const cusum = useRef<HTMLSpanElement>(null);
@@ -60,14 +57,11 @@ export function DetectionBar() {
     }
 
     if (cusum.current) {
-      // A CUSUM accumulates without bound while a fault is held, so after an hour
-      // on the demonstration fault it runs to six figures. The readout is capped
-      // to keep the column width, but a capped value is marked as one: printing
-      // a flat `9999.0` states a precision the detector never reported.
-      const over = d.cusum > CUSUM_DISPLAY_MAX;
+      // No display cap: `detect::CUSUM_CEILING` bounds the accumulator at five
+      // intervals, so the widest this reads is `25.0 / 5`.
       cusum.current.textContent = d.calibrating
         ? NO_VALUE
-        : `${over ? ">" : ""}${fmt(Math.min(d.cusum, CUSUM_DISPLAY_MAX), over ? 0 : 1)} / ${fmt(d.cusum_limit, 0)}`;
+        : `${fmt(d.cusum, 1)} / ${fmt(d.cusum_limit, 0)}`;
     }
     if (cusumWhere.current) {
       cusumWhere.current.textContent = d.cusum_channel || "";

@@ -23,7 +23,7 @@ import { useRef } from "react";
 import { AdvisoryPanel } from "@/components/analysis/AdvisoryPanel";
 import { AXIS_MAX_H, AXIS_TICKS, logX } from "@/components/analysis/prognosis";
 import { Trajectory } from "@/components/analysis/Trajectory";
-import { fmt, NO_VALUE } from "@/lib/fmt";
+import { fmt, lifeRange, NO_VALUE, remainingLife } from "@/lib/fmt";
 import { useLiveSink } from "@/lib/live";
 import type { Parameter } from "@/lib/signatures";
 import { isFresh, SUBSYSTEMS } from "@/lib/telemetry";
@@ -34,6 +34,7 @@ const BAND_LEAD = "rgb(255 107 53 / 0.32)";
 export function Prognosis({ parameters }: { parameters: Parameter[] }) {
   const scope = useRef<HTMLSpanElement>(null);
   const hero = useRef<HTMLSpanElement>(null);
+  const heroUnit = useRef<HTMLSpanElement>(null);
   const interval = useRef<HTMLSpanElement>(null);
   const basis = useRef<HTMLSpanElement>(null);
   const rows = useRef<(HTMLDivElement | null)[]>([]);
@@ -51,17 +52,23 @@ export function Prognosis({ parameters }: { parameters: Parameter[] }) {
     }
     // Never a zero. `hours: null` means nothing is degrading, and a hero reading
     // 0.00 h grounds a serviceable aircraft.
-    if (hero.current) hero.current.textContent = life === null ? NO_VALUE : fmt(life, 2);
+    const shown = life === null ? { value: NO_VALUE, unit: "" } : remainingLife(life);
+    if (hero.current) hero.current.textContent = shown.value;
+    if (heroUnit.current) heroUnit.current.textContent = shown.unit;
     if (interval.current) {
       interval.current.textContent =
-        worst && worst.p10 !== null
-          ? `p10–p90  ${fmt(worst.p10, 2)} – ${worst.p90 === null ? "open" : fmt(worst.p90, 2)} h`
-          : "";
+        worst && worst.p10 !== null ? `p10–p90  ${lifeRange(worst.p10, worst.p90)}` : "";
     }
+    // Two ways to have no life to report and they are not the same claim: the
+    // window is still filling, or it is full and nothing in it is declining. Any
+    // parameter with a fit span answers which, since they share one window.
     if (basis.current) {
+      const span = fresh ? (p?.parameter.find((r) => r.fit_span_s > 0)?.fit_span_s ?? 0) : 0;
       basis.current.textContent = worst
         ? `${worst.driver} falling ${fmt(worst.rate_per_hour, 4)}/h · fitted over ${fmt(worst.fit_span_s / 60, 1)} min`
-        : "no parameter has a trend yet";
+        : span > 0
+          ? `no parameter is declining · fitted over ${fmt(span / 60, 1)} min`
+          : "building the trend window";
     }
 
     rows.current.forEach((row, s) => {
@@ -83,30 +90,39 @@ export function Prognosis({ parameters }: { parameters: Parameter[] }) {
         // A subsystem with no health parameter behind it cannot have a remaining
         // life, and calling that "no decline" would claim a measurement nobody
         // took. The two cases read differently on purpose.
+        //
+        // Wear stands without a projection: a stopped fault is genuinely not
+        // declining and genuinely three quarters used, and a row printing only
+        // the second half of that reads as a healthy subsystem.
+        const spent = rul && rul.consumed >= 0.005;
         if (value) {
-          value.textContent = rul?.driver ? "no decline" : "no parameter";
+          value.textContent = spent
+            ? `${fmt(rul.consumed * 100, 0)}% spent`
+            : rul?.driver
+              ? "no decline"
+              : "no parameter";
           value.style.color = "var(--foreground-dim)";
           value.style.fontSize = "10px";
         }
         if (unit) unit.style.display = "none";
-        if (range) range.textContent = "";
+        if (range) range.textContent = spent ? "no decline" : "";
         if (band) band.style.display = "none";
         if (tick) tick.style.display = "none";
         return;
       }
 
       if (value) {
-        value.textContent =
-          hours < 1 ? fmt(hours, 2) : fmt(Math.min(hours, AXIS_MAX_H), hours < 10 ? 1 : 0);
+        const cell = remainingLife(Math.min(hours, AXIS_MAX_H));
+        value.textContent = cell.value;
         value.style.color = lead ? "var(--primary)" : "var(--foreground)";
         value.style.fontSize = "14px";
+        if (unit) {
+          unit.textContent = cell.unit;
+          unit.style.display = "";
+        }
       }
-      if (unit) unit.style.display = "";
       if (range) {
-        range.textContent =
-          rul.p10 === null
-            ? ""
-            : `[${fmt(rul.p10, 2)} – ${rul.p90 === null ? "open" : fmt(rul.p90, 2)}]`;
+        range.textContent = rul.p10 === null ? "" : `[${lifeRange(rul.p10, rul.p90)}]`;
       }
       if (band && tick) {
         band.style.display = "";
@@ -140,7 +156,7 @@ export function Prognosis({ parameters }: { parameters: Parameter[] }) {
           <span ref={hero} className="num t-hero text-primary">
             {NO_VALUE}
           </span>
-          <span className="text-muted-foreground text-[11px]">h</span>
+          <span ref={heroUnit} className="text-muted-foreground text-[11px]" />
           <span ref={interval} className="num text-foreground-dim ml-auto text-[11px]" />
         </div>
         <span ref={basis} className="t-small text-muted-foreground mt-2 block leading-relaxed" />
@@ -185,9 +201,7 @@ export function Prognosis({ parameters }: { parameters: Parameter[] }) {
                 <span data-value className="num text-[14px]">
                   {NO_VALUE}
                 </span>
-                <span data-unit className="text-muted-foreground text-[10px]">
-                  h
-                </span>
+                <span data-unit className="text-muted-foreground text-[10px]" />
                 <span
                   data-range
                   className="num text-foreground-dim text-right text-[10px] whitespace-nowrap"

@@ -60,6 +60,45 @@ export function grouped(value: number): string {
   return Math.round(value).toLocaleString("en-US").replace("-", MINUS);
 }
 
+/** Hours at the precision the magnitude supports. */
+function figure(hours: number): string {
+  return fmt(hours, hours < 10 ? 2 : hours < 100 ? 1 : 0);
+}
+
+/**
+ * A remaining life, split into its figure and its unit.
+ *
+ * **Hours on every readout, no minutes anywhere.** The subsystem table sits on an
+ * axis ticked `0.1 h` to `1k`, and a row in minutes cannot be compared against the
+ * row above it or placed against the tick beneath it. Split from its unit because
+ * a `0.53 h` returned whole wraps the `h` onto its own line at hero size.
+ *
+ * Zero is a parameter past its threshold, worded rather than rounded into a
+ * number. Use {@link lifeHours} for an interval bound, where zero means something
+ * else entirely.
+ */
+export function remainingLife(hours: number): { value: string; unit: string } {
+  if (!Number.isFinite(hours)) return { value: NO_VALUE, unit: "" };
+  if (hours <= 0) return { value: "PAST", unit: "limit" };
+  return { value: figure(hours), unit: "h" };
+}
+
+/**
+ * A life in hours on one line, for a readout with no separate unit slot.
+ *
+ * Zero prints `0.00 h` and never {@link remainingLife}'s `PAST limit`: on a p50
+ * zero means the parameter is spent, on a p10 it only means the crossing could be
+ * now, and an interval reaching back to the present is the common case.
+ */
+export function lifeHours(hours: number): string {
+  return Number.isFinite(hours) ? `${figure(hours)} h` : NO_VALUE;
+}
+
+/** `p10` to `p90`, unit once. `null` above is a bound the fit cannot set. */
+export function lifeRange(p10: number, p90: number | null): string {
+  return p90 === null ? `${figure(p10)} h – open` : `${figure(p10)} – ${figure(p90)} h`;
+}
+
 /** Seconds since start as `T+HH:MM:SS`. */
 export function missionClock(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "T+00:00:00";

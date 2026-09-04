@@ -19,18 +19,18 @@
  * alone puts the sum of the absolute residuals near eight on an engine with
  * nothing wrong with it.
  *
- * The counterfactual strip beneath is **computed, not written**. Take the driver
- * out of the picture and what limits the engine is whichever subsystem runs out
- * next, so the strip names the second-shortest life rather than an authored one,
- * and it moves when the engine does.
+ * A counterfactual strip sat beneath this and was removed: it named the
+ * second-shortest remaining life, so that `RULED OUT` could not be read as "those
+ * subsystems are healthy". Nothing replaces it, so **a second, milder fault is
+ * invisible here until the loud one is repaired.** The rail's per-subsystem
+ * remaining life is where a reader has to go for it.
  */
 
 import { useRef } from "react";
 
-import { fmt, NO_VALUE } from "@/lib/fmt";
+import { fmt } from "@/lib/fmt";
 import { useLiveSink } from "@/lib/live";
-import type { Frame } from "@/lib/telemetry";
-import { isFresh, SUBSYSTEMS } from "@/lib/telemetry";
+import { isFresh } from "@/lib/telemetry";
 
 /** Rows shown. Beyond five the shares are rounding noise. */
 const ROWS = 5;
@@ -42,8 +42,7 @@ export function Attribution({ channels }: { channels: string[] }) {
   const rows = useRef<(HTMLDivElement | null)[]>([]);
   const note = useRef<HTMLSpanElement>(null);
   const score = useRef<HTMLSpanElement>(null);
-  const counter = useRef<HTMLSpanElement>(null);
-  const strip = useRef<HTMLDivElement>(null);
+  const empty = useRef<HTMLDivElement>(null);
 
   useLiveSink((frame) => {
     const twin = frame.twin;
@@ -51,22 +50,16 @@ export function Attribution({ channels }: { channels: string[] }) {
     const d = twin?.detection;
     const fired = d !== undefined && !d.calibrating && (d.anomaly || d.drift);
 
-    // The counterfactual is a prognosis statement, not an attribution one, so it
-    // is gated on the twin and not on detection: a remaining life exists whether
-    // or not a detector has fired. Without a twin the strip is hidden rather than
-    // emptied, because an empty dashed box reads as a panel that failed to load.
-    const live = twin !== null && fresh;
-    if (strip.current) strip.current.style.display = live ? "" : "none";
-    if (live) counterfactual(counter.current, frame);
-
     if (!twin || !fresh || !fired) {
       rows.current.forEach((row) => row && (row.style.display = "none"));
+      if (empty.current) empty.current.style.display = "flex";
       if (note.current) {
-        note.current.textContent = !live
-          ? "waiting for the twin"
-          : d?.calibrating
-            ? "detector is baselining · nothing to attribute yet"
-            : "no detector has fired · the residual is inside its band";
+        note.current.textContent =
+          !twin || !fresh
+            ? "waiting for the twin"
+            : d?.calibrating
+              ? "detector is baselining · nothing to attribute yet"
+              : "no detector has fired · the residual is inside its band";
       }
       // Back to naming the column. The score belongs to the ranked rows, and
       // keeping the last alarm's total beside a panel showing none of them
@@ -75,7 +68,7 @@ export function Attribution({ channels }: { channels: string[] }) {
       return;
     }
     const magnitudes = twin.normalised.map(Math.abs);
-    if (note.current) note.current.textContent = "";
+    if (empty.current) empty.current.style.display = "none";
 
     const ranked = magnitudes
       .map((v, i) => ({ v, i }))
@@ -160,47 +153,19 @@ export function Attribution({ channels }: { channels: string[] }) {
             />
           </div>
         ))}
-        <span ref={note} className="t-small text-muted-foreground" />
-
-        {/* Provenance is the dashed rule and the tag, never a hue. */}
+        {/* The panel keeps its height whether or not a detector has fired, so
+            with no bars there is a 300px void. The placeholder takes the whole of
+            it rather than leaving one grey line adrift in the middle, which reads
+            as a panel that failed to load. Dashed, the same border this screen
+            uses everywhere a box is holding something it does not have yet. */}
         <div
-          ref={strip}
-          className="border-structure mt-3 flex shrink-0 items-center justify-between gap-4 border border-dashed px-[14px] py-[10px]"
-          style={{ display: "none" }}
+          ref={empty}
+          className="border-structure flex min-h-0 flex-1 flex-col items-center justify-center gap-2 border border-dashed px-[14px] py-[10px]"
         >
-          <span ref={counter} className="t-body text-foreground min-w-0 text-pretty" />
-          <span className="border-structure-hi text-foreground-dim shrink-0 border border-dashed px-[7px] py-[3px] text-[10px] tracking-[0.08em]">
-            ◊ INFERRED
-          </span>
+          <span ref={note} className="t-small text-muted-foreground" />
+          <span className="label-micro">channel ranking appears when a detector fires</span>
         </div>
       </div>
     </section>
   );
-}
-
-/**
- * What would limit the engine if the thing that is limiting it now were fixed.
- *
- * The second-shortest remaining life across the subsystems, which is what the
- * limiting one is hiding. Reported on the median rather than the lower bound,
- * because this is a planning statement rather than the dispatch decision, and
- * `rul::evaluate` already takes that one on p10.
- */
-function counterfactual(el: HTMLSpanElement | null, frame: Frame): void {
-  if (!el) return;
-  const p = frame.prognosis;
-  const limiting = p?.limiting ?? null;
-  if (!p || limiting === null) {
-    el.textContent = "Nothing is limiting the engine · no counterfactual to draw";
-    return;
-  }
-  const next = p.subsystem
-    .map((r, s) => ({ r, s }))
-    .filter((x) => x.s !== limiting && x.r.hours !== null)
-    .toSorted((a, b) => (a.r.hours ?? 0) - (b.r.hours ?? 0))[0];
-
-  const driver = p.subsystem[limiting]?.driver ?? NO_VALUE;
-  el.textContent = next
-    ? `If ${driver} were nominal → limited by ${SUBSYSTEMS[next.s]} at ${fmt(next.r.hours ?? 0, 1)} h`
-    : `If ${driver} were nominal → nothing else is declining`;
 }

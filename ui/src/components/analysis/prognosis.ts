@@ -53,32 +53,14 @@ export function focus(frame: Frame, parameters: Parameter[]): number | null {
     if (i >= 0) return i;
   }
 
-  // `Rul::consumed` is zeroed until a parameter's trend is ready, which takes
-  // five minutes of flight. Ranking those ties every entry at zero and returns
-  // parameter 0 whatever the engine is doing, so the panel names a parameter
-  // sitting at nominal beside a diagnosis naming a different one. The same
-  // fraction taken from the live estimate needs no history and stands in.
-  const theta = frame.twin?.theta;
   let best = -1;
   let most = -Infinity;
-  parameters.forEach((d, i) => {
-    const consumed = p.parameter[i]?.consumed || spent(theta?.[i], d);
+  parameters.forEach((_, i) => {
+    const consumed = p.parameter[i]?.consumed ?? 0;
     if (consumed > most) {
       most = consumed;
       best = i;
     }
   });
   return best < 0 ? null : best;
-}
-
-/**
- * Fraction of a parameter's nominal-to-failure span already given up.
- *
- * Clamped at zero: a parameter estimated above nominal has not recovered life it
- * never spent, and a negative share would outrank a real one.
- */
-function spent(value: number | undefined, d: Parameter): number {
-  if (value === undefined || !Number.isFinite(value)) return 0;
-  const span = d.nominal - d.failure;
-  return span === 0 ? 0 : Math.max((d.nominal - value) / span, 0);
 }
