@@ -24,8 +24,8 @@ const PAD = 10;
 const FLAT_SPAN = 1e-3;
 
 /**
- * Span below which a projected channel is called constant, as a fraction of its
- * own magnitude.
+ * Span below which a channel is called constant, as a fraction of its own
+ * magnitude.
  *
  * Three parts in a thousand, which is loose, and it can be because a projection
  * **freezes the health estimate at the seed**. Nothing wears over the horizon, so
@@ -35,6 +35,18 @@ const FLAT_SPAN = 1e-3;
  * something the spans are one to ten percent and nowhere near this.
  */
 const RELATIVE_FLAT = 3e-3;
+
+/**
+ * Whether a channel moved enough to be worth scaling to its own extremes.
+ *
+ * Both tests, always. The absolute one alone called a cruise held to two feet a
+ * climb, because 2 ft is 2e-3 kft against a 1e-3 threshold. The relative one
+ * alone has no floor at zero, where there is no magnitude to take a fraction of.
+ */
+function isFlat(lo: number, hi: number): boolean {
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return true;
+  return hi - lo < Math.max(FLAT_SPAN, Math.abs(hi) * RELATIVE_FLAT);
+}
 
 /** What a trace is drawn against: an extent, and whether it is worth scaling to. */
 export interface Scale {
@@ -68,7 +80,7 @@ export function series(frames: Frame[], get: (f: Frame) => number, max: number):
     if (value < lo) lo = value;
     if (value > hi) hi = value;
   }
-  return { values, lo, hi, flat: !Number.isFinite(lo) || hi - lo < FLAT_SPAN };
+  return { values, lo, hi, flat: isFlat(lo, hi) };
 }
 
 /** The widest scale covering every series, so they can be drawn against each other. */
@@ -79,12 +91,7 @@ export function span(all: Series[]): Scale {
     if (one.lo < lo) lo = one.lo;
     if (one.hi > hi) hi = one.hi;
   }
-  // The relative test, matching [`scaleOf`]. The absolute one alone called boost
-  // varying 0.51 kPa in 310 a real excursion and drew it at full cell height
-  // beside a readout saying "constant". A channel with no limit has no floor to
-  // hold its scale open, so it is the one that fills the cell on nothing.
-  const flat = !Number.isFinite(lo) || hi - lo < Math.max(FLAT_SPAN, Math.abs(hi) * RELATIVE_FLAT);
-  return { lo, hi, flat };
+  return { lo, hi, flat: isFlat(lo, hi) };
 }
 
 /**
@@ -134,12 +141,9 @@ export function path(values: number[], scale: Scale): string {
  * so a channel drawn against a limit shows the headroom rather than filling the
  * cell and implying there is none.
  *
- * Flatness is relative here where [`series`] takes it absolutely, because a
- * projected channel is read in its own engineering unit against a limit in the
- * same unit. Fuel flow wandering 0.002 kg/h around 11 is a fifth of a tenth of
- * a percent, and scaling that to the cell draws a step change in fuelling that
- * did not happen. The absolute test is kept for recordings, where the channels
- * are already normalised by the strip that draws them.
+ * Flatness is [`isFlat`], the same test everything else here takes. Fuel flow
+ * wandering 0.002 kg/h around 11 is a fifth of a tenth of a percent, and scaling
+ * that to the cell draws a step change in fuelling that did not happen.
  */
 export function scaleOf(values: number[], floor?: number): Series {
   let lo = Number.POSITIVE_INFINITY;
@@ -149,7 +153,7 @@ export function scaleOf(values: number[], floor?: number): Series {
     if (value < lo) lo = value;
     if (value > hi) hi = value;
   }
-  const flat = !Number.isFinite(lo) || hi - lo < Math.max(FLAT_SPAN, Math.abs(hi) * RELATIVE_FLAT);
+  const flat = isFlat(lo, hi);
   if (floor !== undefined && Number.isFinite(lo)) hi = Math.max(hi, floor);
   return { values, lo, hi, flat };
 }
