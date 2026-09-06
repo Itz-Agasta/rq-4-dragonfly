@@ -38,6 +38,9 @@ const LABELS: Record<ScreenId, string> = {
   fleet: "FLEET",
 };
 
+/** Where ABOUT goes. */
+const SOURCE = "https://github.com/Itz-Agasta/rq-4-dragonfly";
+
 const CELL =
   "relative flex h-12 shrink-0 items-center justify-center border-b border-border outline-none " +
   "transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset";
@@ -98,6 +101,14 @@ function Cell({ id, index }: { id: ScreenId; index: number }) {
   );
 }
 
+/**
+ * A cell with no screen behind it.
+ *
+ * `aria-disabled` rather than `disabled`: a disabled button receives no pointer
+ * events, so its tooltip can never open, and the tooltip is the only thing
+ * naming an icon-only cell. Present at all because the rail reads as unfinished
+ * without them and an operator expects them.
+ */
 function UtilityCell({
   label,
   Glyph,
@@ -110,11 +121,6 @@ function UtilityCell({
       <TooltipTrigger asChild>
         <button
           type="button"
-          // Present because the rail reads as unfinished without them and an
-          // operator expects them; neither has a screen yet, so neither navigates.
-          // `aria-disabled` rather than `disabled`: a disabled button receives no
-          // pointer events, so its tooltip can never open, and the tooltip is the
-          // only thing naming an icon-only cell.
           aria-disabled
           className={`${CELL} text-structure/70 cursor-default`}
           aria-label={label}
@@ -125,6 +131,38 @@ function UtilityCell({
       <TooltipContent side="right" sideOffset={6}>
         {label}
         <span className="text-foreground-dim ml-2">not built</span>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
+ * ABOUT opens the source.
+ *
+ * A new tab, not a panel: nothing written here beats the repository at
+ * answering "what is this", and a second copy is a second thing to keep in step.
+ *
+ * **It takes the demonstration out of the kiosk.** `just kiosk` is chromium
+ * `--app` fullscreen and the tab lands on top of it. Hence the bottom of the
+ * rail, where a mis-click is unlikely.
+ */
+function SourceCell() {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <a
+          href={SOURCE}
+          target="_blank"
+          rel="noreferrer"
+          className={`${CELL} text-structure hover:bg-popover hover:text-muted-foreground`}
+          aria-label="ABOUT, opens the source repository"
+        >
+          <AboutGlyph />
+        </a>
+      </TooltipTrigger>
+      <TooltipContent side="right" sideOffset={6}>
+        ABOUT
+        <span className="text-foreground-dim ml-2">source</span>
       </TooltipContent>
     </Tooltip>
   );
@@ -163,7 +201,7 @@ export function NavRail() {
       <div className="min-h-6 flex-1" />
 
       <UtilityCell label="SETTINGS" Glyph={SettingsGlyph} />
-      <UtilityCell label="ABOUT" Glyph={AboutGlyph} />
+      <SourceCell />
     </nav>
   );
 }
