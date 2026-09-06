@@ -134,12 +134,21 @@ function FleetGlyph({ className }: GlyphProps) {
   );
 }
 
-/** Aperture, adjusted. */
+/**
+ * Two rails and their handles.
+ *
+ * 15 x 11 of ink, the proportion SIMULATE takes. It was an aperture whose ticks
+ * reached the same extent as its neighbours and carried none of the mass, so it
+ * read as an 8px ring beside ABOUT's 15px one. A cog is the alternative to keep
+ * resisting: sub-pixel teeth at 1.5px on a 20px box, and it fills in to a disc.
+ */
 function SettingsGlyph({ className }: GlyphProps) {
   return (
     <Frame className={className}>
-      <circle cx="10" cy="10" r="4" />
-      <path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2" />
+      <path d="M2.5 6.5h9M15.5 6.5h2" />
+      <circle cx="13.5" cy="6.5" r="2" />
+      <path d="M2.5 13.5h2.5M9 13.5h8.5" />
+      <circle cx="7" cy="13.5" r="2" />
     </Frame>
   );
 }
