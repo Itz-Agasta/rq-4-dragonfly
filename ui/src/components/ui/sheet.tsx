@@ -103,7 +103,9 @@ function SheetTitle({ className, ...props }: React.ComponentProps<typeof SheetPr
   return (
     <SheetPrimitive.Title
       data-slot="sheet-title"
-      className={cn("font-semibold text-foreground", className)}
+      // `font-semibold` dropped, and `text-sm` off the description below. See
+      // the note in `alert-dialog.tsx`: both beat the theme's own classes.
+      className={cn("text-foreground", className)}
       {...props}
     />
   );
@@ -116,7 +118,7 @@ function SheetDescription({
   return (
     <SheetPrimitive.Description
       data-slot="sheet-description"
-      className={cn("text-sm text-muted-foreground", className)}
+      className={cn("text-muted-foreground", className)}
       {...props}
     />
   );
