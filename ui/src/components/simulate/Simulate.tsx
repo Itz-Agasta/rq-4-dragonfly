@@ -116,10 +116,38 @@ function Waiting({ status, error, label }: { status: Status; error: string; labe
 
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center">
-      <div className="max-w-[420px] text-center">
+      <div className="w-[420px] text-center">
         <div className="t-section text-muted-foreground">{title}</div>
         <div className="label-micro mt-2 leading-[1.5] normal-case">{note}</div>
+        {status === "running" ? <Sweep /> : null}
       </div>
+    </div>
+  );
+}
+
+/**
+ * That the request is still in flight, and how long it has been.
+ *
+ * Indeterminate on purpose: the daemon runs the whole horizon and then answers,
+ * so an invented percentage would be the only unmeasured figure on this screen.
+ * The elapsed count is measured, and it separates a four hour projection, 7.25 s
+ * of wall clock, from a daemon that has stopped answering.
+ */
+function Sweep() {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const start = performance.now();
+    const handle = setInterval(() => setElapsed((performance.now() - start) / 1000), 100);
+    return () => clearInterval(handle);
+  }, []);
+
+  return (
+    <div className="mt-4">
+      <div className="bg-border relative h-[2px] w-full overflow-hidden">
+        <div className="animate-sweep bg-foreground absolute inset-y-0" />
+      </div>
+      <div className="num text-muted-foreground mt-2 text-[11px]">{elapsed.toFixed(1)} s</div>
     </div>
   );
 }
