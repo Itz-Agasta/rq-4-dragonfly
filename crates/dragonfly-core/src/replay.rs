@@ -18,6 +18,7 @@
 //! `link_ok` is whatever was recorded, which is the half that is real.
 use std::fs::File;
 use std::path::Path;
+use std::time::UNIX_EPOCH;
 
 use anyhow::{Context, Result, bail};
 use arrow::array::{
@@ -45,6 +46,13 @@ pub struct MissionInfo {
     pub duration_s: f64,
     /// Bytes on disk.
     pub bytes: u64,
+    /// When the recording was closed, seconds since the Unix epoch.
+    ///
+    /// The file's mtime, so the end of the sortie rather than its start.
+    /// **Do not derive this from the id instead:** `mission-<epoch>` carries a
+    /// date and `coking` and `mission` do not, so a client parsing the stem
+    /// would date some recordings and silently not others.
+    pub recorded_at: Option<i64>,
 }
 
 /// Every recording in `dir`, oldest first.
@@ -89,6 +97,9 @@ pub fn list(dir: &Path) -> Result<Vec<MissionInfo>> {
                 frames,
                 duration_s: duration_from_statistics(metadata),
                 bytes,
+                recorded_at: modified
+                    .and_then(|at| at.duration_since(UNIX_EPOCH).ok())
+                    .and_then(|since| i64::try_from(since.as_secs()).ok()),
             },
         ));
     }

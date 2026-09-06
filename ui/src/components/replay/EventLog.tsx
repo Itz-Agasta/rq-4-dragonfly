@@ -7,18 +7,62 @@
  * the event, which is the only navigation this screen needs.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import { AIRFRAME, ENGINE, ENGINE_SERIAL } from "@/components/app/TopBar";
+import { Field } from "@/components/Field";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { fmt, missionClock, NO_VALUE } from "@/lib/fmt";
 import { subscribe } from "@/lib/live";
-import { bytesLabel, OVERVIEW_STRIDE, rateHz } from "@/lib/mission";
-import { session, useReplay } from "@/store/replay";
+import {
+  bytesLabel,
+  dateStamp,
+  type MissionInfo,
+  OVERVIEW_STRIDE,
+  rateHz,
+  stamp,
+} from "@/lib/mission";
+import { type MissionReport, session, useReplay } from "@/store/replay";
+
+/** An event, as both the log rows and the report file need it. */
+interface Event {
+  t_s: number;
+  severity: string;
+  subsystem: string;
+  message: string;
+}
+
+/** One built file, weighed, waiting on the confirmation card. */
+interface Built {
+  name: string;
+  text: string;
+  type: string;
+  bytes: number;
+}
+
+/** Both files the card offers, and what they are about. */
+interface Export {
+  report: Built;
+  csv: Built;
+  events: number;
+}
 
 export function EventLog() {
   const events = useReplay((s) => s.events);
   const report = useReplay((s) => s.report);
   const info = useReplay((s) => s.info);
   const rows = useRef(new Map<string, HTMLButtonElement>());
+  /** The built report the card is asking about, or null when it is closed. */
+  const [pending, setPending] = useState<Export | null>(null);
   // Taken from the recording's own frame count rather than assumed, so a
   // recording made at another rate states that rate.
   const basis = info ? (rateHz(info) / OVERVIEW_STRIDE).toFixed(1) : "";
@@ -134,17 +178,14 @@ export function EventLog() {
         <div className="px-4 pt-[10px] pb-[14px]">
           <button
             type="button"
-            onClick={() => exportReport(events, info?.id ?? "mission")}
+            onClick={() => setPending(build(events, report, info))}
             className="border-foreground hover:bg-foreground hover:text-background focus-visible:ring-ring w-full border py-[9px] text-[11px] tracking-[0.12em] focus-visible:ring-1 focus-visible:outline-none"
           >
             EXPORT REPORT
           </button>
-          <div className="label-micro mt-2 text-center">
-            {info
-              ? `${bytesLabel(info.bytes)} · ${info.frames.toLocaleString("en-US")} frames`
-              : ""}
-          </div>
         </div>
+
+        <ConfirmExport ready={pending} info={info} onClose={() => setPending(null)} />
       </div>
     </div>
   );
@@ -160,33 +201,192 @@ function Tile({ label, value, last = false }: { label: string; value: string; la
 }
 
 /**
- * The log as a file, built from what is already on screen.
+ * The two files, built from what is already on screen.
  *
- * Not a server-side report: every line of it was derived here from the recorded
- * frames, and asking the daemon for it would be a second implementation of the
- * event rules.
+ * Derived here rather than asked of the daemon, which would be a second
+ * implementation of the event rules.
+ *
+ * **A report has to be filable or it is not a report.** The header block is the
+ * identity and the detection summary is the finding; without them this was a
+ * list of residuals with no record to attach it to.
+ *
+ * Built before the card opens, so the size on it is this exact string's.
  */
-function exportReport(
-  events: { t_s: number; severity: string; subsystem: string; message: string }[],
-  id: string,
-): void {
-  const lines = [
-    `RQ-4 DRAGONFLY mission report`,
-    `mission     ${id}`,
-    `duration    ${missionClock(session.duration)}`,
-    `events      ${events.length}`,
+function build(events: Event[], report: MissionReport, info: MissionInfo | null): Export {
+  const ordered = events.toSorted((a, b) => a.t_s - b.t_s);
+  const stem = `${AIRFRAME}${info?.recorded_at ? `_${dateStamp(info.recorded_at)}` : ""}`;
+  return {
+    report: file(`${stem}_report.txt`, "text/plain", reportText(ordered, report, info)),
+    csv: file(`${stem}_events.csv`, "text/csv", csvText(ordered)),
+    events: events.length,
+  };
+}
+
+/** A built file and its measured length. */
+function file(name: string, type: string, text: string): Built {
+  return {
+    name,
+    text,
+    type,
+    // Encoded length, not `text.length`. The sigma in every residual message is
+    // two bytes, so the two disagree on every report this product produces and
+    // the card is the one place the figure has to be the file's.
+    bytes: new TextEncoder().encode(text).length,
+  };
+}
+
+/** Left column width in the header block, so the values line up. */
+const PAD = 13;
+
+function reportText(events: Event[], report: MissionReport, info: MissionInfo | null): string {
+  const row = (label: string, value: string) => `${label.padEnd(PAD)}${value}`;
+  const hz = info ? rateHz(info) : 0;
+  return [
+    "RQ-4 DRAGONFLY  MISSION HEALTH REPORT",
     "",
-    ...events
-      .toSorted((a, b) => a.t_s - b.t_s)
-      .map(
-        (event) =>
-          `${missionClock(event.t_s)}  ${event.severity.toUpperCase().padEnd(9)}  ${event.subsystem.padEnd(12)}  ${event.message}`,
-      ),
-  ];
-  const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/plain" }));
+    row("AIRFRAME", AIRFRAME),
+    row("ENGINE", `${ENGINE}  ${ENGINE_SERIAL}`),
+    row("RECORDING", info?.id ?? "unknown"),
+    row("RECORDED", info?.recorded_at ? stamp(info.recorded_at) : "no date on the recording"),
+    // `.slice(2)` drops the `T+`, which belongs on a mission timestamp and not on
+    // an elapsed time. Every stamp below keeps it.
+    row(
+      "DURATION",
+      `${missionClock(session.duration).slice(2)}   engine hours ${fmt(session.duration / 3600, 1)}`,
+    ),
+    row("SAMPLES", info ? `${info.frames.toLocaleString("en-US")} frames at ${hz} Hz` : "unknown"),
+    "",
+    "DETECTION",
+    // The absence is the finding, and it is the argument this product exists to
+    // make: on a coked injector every certificated limit that could see it is an
+    // upper bound, so none of them ever trips. Written as an absence here for the
+    // same reason the panel above the button writes it as one.
+    row(
+      "  TWIN",
+      report.detected_s === null
+        ? "no drift latched"
+        : `drift at ${missionClock(report.detected_s)}`,
+    ),
+    row(
+      "  REDLINE",
+      report.redline_s === null
+        ? "no certified limit tripped"
+        : `${report.redline_channel} at ${missionClock(report.redline_s)}`,
+    ),
+    row("  EVENTS", String(events.length)),
+    "",
+    `EVENTS  (${events.length}, derived from the recording at ${hz > 0 ? (hz / OVERVIEW_STRIDE).toFixed(1) : "?"} Hz)`,
+    "",
+    ...events.map(
+      (event) =>
+        `${missionClock(event.t_s)}  ${event.severity.toUpperCase().padEnd(9)}  ${event.subsystem.padEnd(12)}  ${event.message}`,
+    ),
+    "",
+  ].join("\n");
+}
+
+/**
+ * The same events for something that consumes them rather than reads them.
+ *
+ * `t_s` as well as the clock, because a spreadsheet cannot sort `T+03:36:22` and
+ * whatever ingests this will want to join on seconds.
+ */
+function csvText(events: Event[]): string {
+  return [
+    "t_s,mission_clock,severity,subsystem,message",
+    ...events.map((event) =>
+      [
+        event.t_s.toFixed(3),
+        missionClock(event.t_s),
+        event.severity,
+        event.subsystem,
+        event.message,
+      ]
+        .map(csvCell)
+        .join(","),
+    ),
+    "",
+  ].join("\n");
+}
+
+/** RFC 4180 quoting. Every message here contains commas. */
+function csvCell(value: string): string {
+  return /[",\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
+}
+
+/** Hand a built file to the browser. */
+function download({ name, text, type }: Built): void {
+  const url = URL.createObjectURL(new Blob([text], { type }));
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `${id}-report.txt`;
+  anchor.download = name;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+/**
+ * What is about to be saved, before it is.
+ *
+ * It replaced a caption reading `119 MB · 434,090 frames`, which are the
+ * **recording's** figures on a button that saves a 2 kB report. A CSV of the
+ * same events was built and removed; one artefact is enough.
+ *
+ * The copy says what the file is and what it covers, never where it was
+ * assembled: that is a fact about this codebase, not about the download.
+ */
+function ConfirmExport({
+  ready,
+  info,
+  onClose,
+}: {
+  ready: Export | null;
+  info: MissionInfo | null;
+  onClose: () => void;
+}) {
+  if (!ready) return null;
+
+  return (
+    <AlertDialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <AlertDialogContent className="w-[420px] gap-0 p-0 sm:max-w-[420px]">
+        <AlertDialogHeader className="border-border place-items-start gap-0 border-b px-4 py-[10px] text-left">
+          <AlertDialogTitle className="t-section">EXPORT REPORT</AlertDialogTitle>
+        </AlertDialogHeader>
+
+        <div className="border-border border-b px-4 py-[10px]">
+          <Field label="mission">
+            {AIRFRAME}
+            {info?.recorded_at ? ` · ${stamp(info.recorded_at)}` : ""}
+          </Field>
+          <Field label="covers">
+            <AlertDialogDescription className="text-inherit">
+              {missionClock(session.duration).slice(2)} and {ready.events}{" "}
+              {ready.events === 1 ? "event" : "events"}
+              {info ? `, from ${info.frames.toLocaleString("en-US")} recorded frames` : ""}
+            </AlertDialogDescription>
+          </Field>
+        </div>
+
+        <div className="px-4 py-[10px]">
+          <Field label="file">
+            <span className="num break-all">{ready.report.name}</span>
+            <span className="text-muted-foreground"> · {bytesLabel(ready.report.bytes)}</span>
+          </Field>
+        </div>
+
+        <AlertDialogFooter className="border-border gap-2 border-t px-4 py-[10px]">
+          <AlertDialogCancel size="sm" variant="ghost">
+            CANCEL
+          </AlertDialogCancel>
+          <AlertDialogAction size="sm" variant="outline" onClick={() => download(ready.report)}>
+            SAVE
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
 }

@@ -10,7 +10,7 @@
  * are live on OPS, and a second authored set is a second answer to one question.
  */
 
-import { AIRFRAME } from "@/components/app/TopBar";
+import { AIRFRAME, ENGINE_SERIAL } from "@/components/app/TopBar";
 import type { SUBSYSTEMS } from "@/lib/telemetry";
 
 /** Which of the seven indices is worst, named as the rest of the app names it. */
@@ -66,7 +66,7 @@ export const ROSTER: Airframe[] = [
   {
     tail: AIRFRAME,
     base: "ATR-CTD",
-    engine: "E4P-330131",
+    engine: ENGINE_SERIAL,
     hours: 1147,
     state: "station",
     subsystem: null,

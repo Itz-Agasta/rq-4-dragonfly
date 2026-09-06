@@ -21,6 +21,24 @@ export interface MissionInfo {
   /** Mission time of the last frame, seconds. */
   duration_s: number;
   bytes: number;
+  /**
+   * When the recording was closed, seconds since the Unix epoch, or null.
+   *
+   * The end of the sortie rather than its start, and the only date any client
+   * has: the ids do not carry one reliably. See `replay::MissionInfo`.
+   */
+  recorded_at: number | null;
+}
+
+/** `2026-09-06 17:34 UTC`, or an empty string when there is no date. */
+export function stamp(at: number | null): string {
+  if (at === null) return "";
+  return `${new Date(at * 1000).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
+/** `20260906`, for a filename that sorts. Empty when there is no date. */
+export function dateStamp(at: number | null): string {
+  return stamp(at).slice(0, 10).replaceAll("-", "");
 }
 
 /** Which part of a recording to ask for. Mirrors `replay::Window`. */
@@ -77,7 +95,11 @@ export async function readMission(id: string, window: MissionWindow): Promise<Fr
 export function bytesLabel(bytes: number): string {
   if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
   if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`;
-  return `${Math.round(bytes / 1e3)} kB`;
+  // Bytes below a kilobyte, because the export card weighs a text report as
+  // well as a recording and rounding a 400 byte file to `0 kB` reads as an
+  // export that produced nothing.
+  if (bytes >= 1e3) return `${Math.round(bytes / 1e3)} kB`;
+  return `${bytes} B`;
 }
 
 /** Publish rate the recording was made at, from its own frame count. */

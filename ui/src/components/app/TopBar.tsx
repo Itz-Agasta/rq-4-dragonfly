@@ -18,6 +18,19 @@ import { useReplay } from "@/store/replay";
 // Exported so FLEET can mark this station's own row rather than repeating the string.
 export const AIRFRAME = "TAPAS-AF07";
 
+/**
+ * The engine this station is watching.
+ *
+ * MOCK: the serial is authored, replaced by a node identity message when one
+ * exists. The type is not mocked; `engine-model/src/published.rs` holds its
+ * certificated figures. Here rather than in FLEET's roster because the exported
+ * report needs it and REPLAY must not reach into `components/fleet/`.
+ */
+export const ENGINE = "Austro E4P (AE330)";
+
+/** Serial of that engine. MOCK, see {@link ENGINE}. */
+export const ENGINE_SERIAL = "E4P-330131";
+
 function Rule() {
   return <span className="bg-border w-px self-stretch" aria-hidden="true" />;
 }
