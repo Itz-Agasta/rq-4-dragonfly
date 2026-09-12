@@ -6,8 +6,6 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-ndarray = "0.17.2"
-ort = "2.0.0-rc.13"
 serde.workspace = true
 thiserror.workspace = true
 twin-core.workspace = true
