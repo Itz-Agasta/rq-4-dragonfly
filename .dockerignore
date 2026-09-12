@@ -1,0 +1,27 @@
+# Build artefacts. `target` alone is 12 GB and would be shipped to the daemon
+# before the first instruction ran.
+target/
+node_modules/
+ui/node_modules/
+ui/dist/
+.vite/
+*.tsbuildinfo
+
+# Mission recordings are seeded onto the host by scp, never baked into the
+# image: one of them is 104 MB and it changes independently of the code.
+data/
+
+# Deck material and research scratch. None of it reaches the runtime.
+ppt/
+ppt2/
+ppt3/
+ppt4/
+ppt5/
+diagrams/
+ml/
+*.pptx
+*.pdf
+*.png
+
+.git/
+.github/

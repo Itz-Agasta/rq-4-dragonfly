@@ -1,0 +1,76 @@
+name: dragonfly
+
+services:
+  # Owns the network namespace, and therefore owns the bus. NET_ADMIN is what
+  # lets the entrypoint create vcan0 inside it; the host kernel still has to
+  # have the vcan module, which a container cannot load for itself.
+  core:
+    image: ${DOCKER_USER:?set DOCKER_USER in .env}/dragonfly:${TAG:?set TAG in .env}
+    command: ["core"]
+    cap_add:
+      - NET_ADMIN
+    restart: unless-stopped
+    networks:
+      - dragonfly
+    # Loopback only. Published so the reset watchdog on the host can read
+    # /api/health without going through Caddy, and so a debug session has
+    # somewhere to point that is not the public name.
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      # Read only, because the core runs with --no-record. A curated mission is
+      # scp'd into this directory once; nothing writes to it for the life of
+      # the deployment.
+      - ./missions:/data/missions:ro
+    environment:
+      RUST_LOG: "dragonfly_core=info"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/api/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+
+  # No ports and no capabilities of its own: it inherits the core's namespace,
+  # which is the whole point. Two processes on one vcan0 is the same topology
+  # `just sim` plus `just core` gives on a workstation.
+  sim:
+    image: ${DOCKER_USER:?set DOCKER_USER in .env}/dragonfly:${TAG:?set TAG in .env}
+    command: ["sim", "--profile", "cruise"]
+    network_mode: "service:core"
+    depends_on:
+      - core
+    restart: unless-stopped
+    environment:
+      RUST_LOG: "dragonfly_sim=info"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    networks:
+      - dragonfly
+    ports:
+      - "80:80"
+      - "443:443"
+      # HTTP/3. Harmless if the client never uses it, and Caddy advertises it.
+      - "443:443/udp"
+    environment:
+      # Substituted into the Caddyfile at parse time, so the Caddyfile itself
+      # stays deployment agnostic and tracked in git.
+      DRAGONFLY_DOMAIN: ${DRAGONFLY_DOMAIN:?set DRAGONFLY_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The issued certificate lives here. Losing this volume means re-issuing,
+      # and Let's Encrypt rate limits repeat issuance for a name.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - core
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  dragonfly:

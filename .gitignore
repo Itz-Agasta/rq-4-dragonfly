@@ -32,3 +32,12 @@ data/*
 *.swp
 .idea/
 .vscode/
+
+# deployment
+# `.env` holds the domain, the ACME contact and the image tag: everything that
+# differs between one deployment and the next. Keeping it out is what lets the
+# server run `git pull` without ever hitting a conflict.
+deploy/.env
+# The curated mission REPLAY opens, scp'd onto the box once. Also caught by the
+# *.parquet rule above, listed here so the directory's purpose is obvious.
+deploy/missions/

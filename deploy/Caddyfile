@@ -1,0 +1,21 @@
+# Nothing in this file is specific to one deployment, on purpose.
+#
+# The domain and the ACME contact come from the environment, so this file is
+# committed and never edited on a server.
+#
+# Both are set in `deploy/.env`, which is gitignored.
+{
+	# Where Let's Encrypt sends expiry notices. Unreachable is accepted by ACME
+	# but you lose the warning, so it is required here rather than defaulted.
+	email {$ACME_EMAIL}
+}
+
+{$DRAGONFLY_DOMAIN} {
+	# A replay window is up to MAX_FRAMES (20,000) frames of MessagePack, which
+	# compresses well and is the largest thing this site ever serves. The
+	# WebSocket feed is per-message binary and passes through untouched.
+	encode zstd gzip
+
+	# Caddy proxies WebSocket upgrades natively; /ws needs no separate handler.
+	reverse_proxy core:8787
+}
