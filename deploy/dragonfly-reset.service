@@ -1,0 +1,9 @@
+[Unit]
+Description=Reset the DRAGONFLY demo when no one is watching
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Environment=COMPOSE_DIR=/opt/dragonfly/deploy
+ExecStart=/opt/dragonfly/deploy/reset.sh

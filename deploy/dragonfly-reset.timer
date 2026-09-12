@@ -1,0 +1,10 @@
+[Unit]
+Description=Poll the DRAGONFLY demo for an empty, dirty stack
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
