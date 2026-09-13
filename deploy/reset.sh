@@ -43,7 +43,7 @@ fi
 
 clients=$(sed -n 's/.*"clients":[[:space:]]*\([0-9]*\).*/\1/p' <<<"$health")
 if [[ -z $clients ]]; then
-    echo "reset: no clients field in $health" >&2
+    echo "<3>reset: no clients field in $health" >&2
     exit 1
 fi
 
@@ -70,10 +70,13 @@ uptime_s=$(($(date +%s) - started_epoch))
 # The log line `send_command` emits after a successful write to the bus. Reading
 # the log rather than tracking state in a file means the marker and the restart
 # cannot disagree: both are anchored to the same container start.
-dirty=0
-if docker logs --since "$started_epoch" "$id" 2>&1 | grep -q "fault command published"; then
-    dirty=1
-fi
+#
+# Counted, never `grep -q`. **`-q` exits on its first match**, which closes the
+# pipe and fells `docker logs` with SIGPIPE, and under `pipefail` that made the
+# pipeline fail exactly when it had found something: a dirty stack read as
+# clean, every time, and nothing was ever restarted. `-c` drains the stream.
+hits=$(docker logs --since "$started_epoch" "$id" 2>&1 | grep -c "fault command published" || true)
+dirty=$((hits > 0))
 
 if ((dirty == 0 && uptime_s < MAX_UPTIME_S)); then
     # Idle and clean. Leave it flying and keep the counter latched, so the next
@@ -83,7 +86,7 @@ if ((dirty == 0 && uptime_s < MAX_UPTIME_S)); then
 fi
 
 reason=$( ((dirty == 1)) && echo "a fault was injected" || echo "uptime ${uptime_s}s")
-echo "reset: restarting core and sim, no clients and $reason"
+echo "<5>reset: restarting core and sim, no clients and $reason"
 
 # Cleared before the restart, not after: a restart that fails part way leaves the
 # counter latched at the threshold otherwise, and every subsequent tick retries

@@ -7,3 +7,11 @@ Requires=docker.service
 Type=oneshot
 Environment=COMPOSE_DIR=/opt/dragonfly/deploy
 ExecStart=/opt/dragonfly/deploy/reset.sh
+
+# A oneshot polled every 30 s writes systemd's own "Starting" and "Finished"
+# pair to the journal on every tick, which buries the handful of lines that
+# mean something under 2,880 a day that do not. Both are info level, and
+# LogLevelMax covers what PID 1 logs about a unit as well as what the unit
+# prints, so capping at notice drops them. reset.sh prefixes the lines worth
+# keeping with journald's <5> and <3> priority markers to clear the bar.
+LogLevelMax=notice
