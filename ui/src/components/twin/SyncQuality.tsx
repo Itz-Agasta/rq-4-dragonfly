@@ -82,7 +82,7 @@ export function SyncQuality() {
   });
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <div data-tour="twin-sync" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <div className="border-border flex h-[36px] shrink-0 items-center justify-between gap-2 border-b px-4">
         <span className="t-section">TWIN SYNC QUALITY</span>
         <span ref={state} className="label-micro shrink-0">

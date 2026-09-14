@@ -7,14 +7,16 @@
  */
 
 import { useEffect } from "react";
-import { Outlet, useLocation } from "react-router";
+import { Outlet, useLocation, useNavigate } from "react-router";
 
 import { NavRail } from "@/components/app/NavRail";
+import { Toasts } from "@/components/app/Toasts";
 import { TopBar } from "@/components/app/TopBar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { pollHealth } from "@/lib/health";
 import { report } from "@/lib/report";
 import { connect } from "@/lib/telemetry";
+import { startTourOnFirstVisit } from "@/lib/tour";
 import { type ScreenId, useApp } from "@/store/app";
 import { telemetry } from "@/store/telemetry";
 
@@ -30,7 +32,15 @@ const TITLES: Record<string, string> = {
 
 export function Shell() {
   const location = useLocation();
+  const navigate = useNavigate();
   const screen = (location.pathname.replace("/", "") || "ops") as ScreenId;
+
+  // Offered once per browser, and never under `just kiosk`. Separate from the
+  // socket effect below and deliberately not waiting on it: the tour's first
+  // four steps are shell chrome, which renders before a frame arrives, and
+  // gating on the feed would leave a new user looking at an unexplained screen
+  // for as long as the core takes to come up.
+  useEffect(() => startTourOnFirstVisit((to) => void navigate(to)), [navigate]);
 
   useEffect(() => {
     const { setSocket, setHealth } = useApp.getState();
@@ -59,6 +69,7 @@ export function Shell() {
             <Outlet />
           </main>
         </div>
+        <Toasts />
       </div>
     </TooltipProvider>
   );

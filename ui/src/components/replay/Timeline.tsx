@@ -75,7 +75,10 @@ export function Timeline() {
   const labels = useMemo(() => milestones(events), [events]);
 
   return (
-    <div className="border-border flex h-[90px] min-w-0 shrink-0 items-stretch border-b">
+    <div
+      data-tour="replay-timeline"
+      className="border-border flex h-[90px] min-w-0 shrink-0 items-stretch border-b"
+    >
       <div className="border-border flex shrink-0 items-center gap-[14px] border-r px-[18px]">
         <div className="flex items-stretch">
           <Transport label="back one minute" onClick={() => session.step(-1)}>

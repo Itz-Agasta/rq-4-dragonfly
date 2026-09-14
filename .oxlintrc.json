@@ -16,5 +16,11 @@
     "typescript/consistent-type-imports": "error",
     "react/react-in-jsx-scope": "off"
   },
-  "ignorePatterns": ["dist/**", "node_modules/**"]
+  "ignorePatterns": ["dist/**", "node_modules/**"],
+  "overrides": [
+    {
+      "files": ["ui/scripts/**"],
+      "rules": { "no-console": "off" }
+    }
+  ]
 }

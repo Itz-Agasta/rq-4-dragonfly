@@ -66,7 +66,10 @@ export function Twin() {
         />
       </div>
 
-      <div className="cell cell--flush marks relative flex min-h-0 min-w-0 flex-col">
+      <div
+        data-tour="twin-pair"
+        className="cell cell--flush marks relative flex min-h-0 min-w-0 flex-col"
+      >
         <div className="border-border flex h-[40px] shrink-0 items-center justify-between gap-6 border-b px-[18px]">
           <span className="flex min-w-0 items-baseline gap-3">
             <span className="t-section whitespace-nowrap">MEASURED vs PHYSICS TWIN</span>

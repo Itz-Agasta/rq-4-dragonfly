@@ -81,11 +81,15 @@ export function TopBar({ screen }: { screen: string }) {
       </div>
 
       <div className="flex shrink-0 items-stretch">
-        <Readout id="altitude" />
-        <Rule />
-        <Readout id="oat" />
-        <Rule />
-        <Readout id="ias" />
+        {/* Grouped so the tour can spotlight the model's three inputs without
+            also taking in the engine state and the twin pill beside them. */}
+        <div className="flex items-stretch" data-tour="topbar-inputs">
+          <Readout id="altitude" />
+          <Rule />
+          <Readout id="oat" />
+          <Rule />
+          <Readout id="ias" />
+        </div>
         <Rule />
 
         <div className="border-border flex items-center gap-2 border-r px-[14px]">
@@ -114,7 +118,7 @@ export function TopBar({ screen }: { screen: string }) {
             </span>
           </div>
         ) : (
-          <div className="flex items-center gap-2 pr-6 pl-[14px]">
+          <div className="flex items-center gap-2 pr-6 pl-[14px]" data-tour="topbar-twin">
             {/* The dot pulses only while the twin is locked. A still dot and a
               moving one are distinguishable at a glance from across a room,
               which a word in 11px type is not. */}

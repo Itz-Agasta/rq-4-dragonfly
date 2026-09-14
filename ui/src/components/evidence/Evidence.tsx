@@ -79,6 +79,7 @@ function Index({ active, onJump }: { active: string; onJump: (id: string) => voi
     <nav
       className="border-border flex w-[208px] shrink-0 flex-col border-r"
       aria-label="Document sections"
+      data-tour="evidence-index"
     >
       {SECTIONS.map(([id, num, label]) => (
         <button

@@ -242,7 +242,10 @@ export function Schematic() {
   const fault = useFaultCylinder();
 
   return (
-    <section className="bg-card marks relative flex min-h-0 min-w-0 flex-1 flex-col">
+    <section
+      data-tour="ops-schematic"
+      className="bg-card marks relative flex min-h-0 min-w-0 flex-1 flex-col"
+    >
       <div className="flex h-10 shrink-0 items-center justify-between gap-5 px-[18px]">
         <div className="flex min-w-0 items-baseline gap-[14px]">
           <span className="t-section tracking-[0.02em] whitespace-nowrap">ENGINE SCHEMATIC</span>

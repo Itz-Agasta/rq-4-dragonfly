@@ -141,7 +141,10 @@ export function Prognosis({ parameters }: { parameters: Parameter[] }) {
   });
 
   return (
-    <section className="cell cell--flush flex h-full min-h-0 min-w-0 flex-col">
+    <section
+      data-tour="analysis-prognosis"
+      className="cell cell--flush flex h-full min-h-0 min-w-0 flex-col"
+    >
       <header className="border-border flex h-9 shrink-0 items-center justify-between border-b px-4">
         <h2 className="t-section">Prognosis</h2>
         <span className="label-micro">RUL · p50</span>

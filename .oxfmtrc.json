@@ -8,5 +8,5 @@
   "insertFinalNewline": true,
   "sortImports": true,
   "sortTailwindcss": true,
-  "ignorePatterns": ["dist/**", "node_modules/**"]
+  "ignorePatterns": ["dist/**", "node_modules/**", "ui/public/validation/**"]
 }

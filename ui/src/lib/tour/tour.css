@@ -1,0 +1,232 @@
+/* The tour popover, reskinned onto the product's own surfaces.
+
+   driver.js opens with `all: unset` on `.driver-popover` and then paints a white
+   rounded card, so this file is a replacement rather than a set of tweaks. Every
+   value is a token from `index.css`; nothing here introduces a colour. Scoped by
+   `.dragonfly-tour`, the `popoverClass` the tour passes, which also wins on
+   specificity over the library's single-class rules. */
+
+.driver-popover.dragonfly-tour {
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: none;
+  padding: 14px 16px 12px;
+  min-width: 300px;
+  max-width: 400px;
+  font-family: var(--font-mono);
+  color: var(--foreground);
+
+  /* Corner crosshairs, the same mark `NavRail` puts on the active cell. Drawn as
+     eight background gradients rather than pseudo-elements because both of those
+     are already spent: driver.js owns the arrow and the close button sits in the
+     corner the marks have to reach. 5px arms inset 5px, matching the rail. */
+  background-image:
+    linear-gradient(var(--structure-hi), var(--structure-hi)),
+    linear-gradient(var(--structure-hi), var(--structure-hi)),
+    linear-gradient(var(--structure-hi), var(--structure-hi)),
+    linear-gradient(var(--structure-hi), var(--structure-hi)),
+    linear-gradient(var(--structure-hi), var(--structure-hi)),
+    linear-gradient(var(--structure-hi), var(--structure-hi)),
+    linear-gradient(var(--structure-hi), var(--structure-hi)),
+    linear-gradient(var(--structure-hi), var(--structure-hi));
+  background-size:
+    5px 1px,
+    1px 5px,
+    5px 1px,
+    1px 5px,
+    5px 1px,
+    1px 5px,
+    5px 1px,
+    1px 5px;
+  background-position:
+    5px 5px,
+    5px 5px,
+    calc(100% - 5px) 5px,
+    calc(100% - 5px) 5px,
+    5px calc(100% - 5px),
+    5px calc(100% - 5px),
+    calc(100% - 5px) calc(100% - 5px),
+    calc(100% - 5px) calc(100% - 5px);
+  background-repeat: no-repeat;
+}
+
+/* No arrow. The library draws it as a CSS border triangle, which cannot carry
+   the popover's 1px hairline, so a bordered card grows an unbordered tail. The
+   stage cutout at 4px padding already names the panel being described. */
+.driver-popover.dragonfly-tour .driver-popover-arrow {
+  display: none;
+}
+
+.driver-popover.dragonfly-tour .driver-popover-title {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+  color: var(--foreground);
+  /* Clear of the close button, which is absolutely positioned at 32px wide. */
+  padding-right: 30px;
+}
+
+.driver-popover.dragonfly-tour .driver-popover-description {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 400;
+  /* 1.6 rather than the 1.5 used elsewhere: these run to five lines of mono at
+     12px, which is denser than any other prose in the application. */
+  line-height: 1.6;
+  color: var(--muted-foreground);
+}
+
+/* The rail's screen legend. Seven rows scanned in one pass, not read, which is
+   why it is a list and not the sentence that would have to name seven screens
+   inside a 25 word budget.
+
+   Grid rather than flex rows: the labels are 3 to 8 characters and a ragged
+   second column reads as seven unrelated lines. `max-content` sizes the rule to
+   EVIDENCE, the longest, and every purpose then starts on the same axis. */
+.driver-popover.dragonfly-tour .tour-legend {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 5px 12px;
+  margin: 11px 0 0;
+  padding: 9px 0 0;
+  border-top: 1px solid var(--border);
+  list-style: none;
+}
+
+.driver-popover.dragonfly-tour .tour-legend li {
+  display: contents;
+}
+
+.driver-popover.dragonfly-tour .tour-legend b {
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: var(--tracking-label);
+  line-height: 1.5;
+  color: var(--foreground);
+}
+
+.driver-popover.dragonfly-tour .tour-legend span {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted-foreground);
+}
+
+.driver-popover.dragonfly-tour .driver-popover-close-btn {
+  width: 28px;
+  height: 24px;
+  font-size: 15px;
+  font-weight: 400;
+  /* Not --structure, which index.css reserves for line-work: on a screen tour's
+     first step this is the only way out, so it has to be findable. */
+  color: var(--muted-foreground);
+  transition: color 150ms;
+}
+
+.driver-popover.dragonfly-tour .driver-popover-close-btn:hover,
+.driver-popover.dragonfly-tour .driver-popover-close-btn:focus-visible {
+  color: var(--foreground);
+}
+
+.driver-popover.dragonfly-tour .driver-popover-footer {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+/* Step counter, in the 10px tracked uppercase used for every label in the
+   product. `.label-micro` is not reachable here: driver.js appends the popover
+   to `document.body`, outside the Tailwind-scoped tree. */
+.driver-popover.dragonfly-tour .driver-popover-progress-text {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: var(--tracking-label);
+  font-variant-numeric: tabular-nums;
+  /* --foreground-dim is 3.92:1 and scoped to graphics and disabled states in
+     index.css. This is a label at 10px, so it takes the label colour. */
+  color: var(--muted-foreground);
+}
+
+.driver-popover.dragonfly-tour .driver-popover-footer-btn {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  border-radius: 0;
+  padding: 6px 10px;
+  background-color: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  transition:
+    color 150ms,
+    border-color 150ms,
+    background-color 150ms;
+}
+
+.driver-popover.dragonfly-tour .driver-popover-footer-btn:hover,
+.driver-popover.dragonfly-tour .driver-popover-footer-btn:focus-visible {
+  background-color: var(--popover);
+  color: var(--foreground);
+}
+
+/* NEXT is the one button a reader should find without looking, so it is marked
+   the way this product marks anything active: full luminance and a brighter
+   edge. Deliberately NOT the accent, which means an alarm needs attention and
+   would read as one from across a room. */
+.driver-popover.dragonfly-tour .driver-popover-next-btn {
+  color: var(--foreground);
+  border-color: var(--structure-hi);
+}
+
+.driver-popover.dragonfly-tour .driver-popover-btn-disabled {
+  opacity: 1;
+  color: var(--foreground-dim);
+  border-color: var(--border);
+}
+
+.driver-popover.dragonfly-tour .driver-popover-navigation-btns button + button {
+  margin-left: 6px;
+}
+
+/* SKIP and ALL SCREENS sit left of the navigation buttons on an opening step.
+   Both quieter than BACK: each is a valid choice but neither is the one being
+   offered, and a third button at NEXT's weight would leave the step with no
+   obvious default. */
+.driver-popover.dragonfly-tour .driver-skip-btn,
+.driver-popover.dragonfly-tour .driver-alt-btn {
+  /* Quiet by losing the border, not by dimming the text. --structure is 2.05:1
+     and index.css scopes it to schematic line-work, never to a label someone is
+     expected to read. NEXT stays the obvious default on its brighter edge. */
+  border-color: transparent;
+  color: var(--muted-foreground);
+}
+
+/* Only the leftmost pushes the navigation buttons across, or the gap opens
+   between SKIP and ALL SCREENS instead of before them. */
+.driver-popover.dragonfly-tour .driver-skip-btn {
+  margin-right: auto;
+}
+
+/* The cutout edge. Without it a highlighted panel on a near-black surface is
+   marked only by the overlay's 0.72 opacity, which across a lit room reads as
+   nothing at all.
+
+   `.driver-overlay` is the svg itself. Reachable only through `stroke`: the
+   library sets `fill` and `opacity` inline on the path, and inline wins. That
+   opacity covers the stroke too, so `--structure-hi` lands near `--structure`
+   on screen, which is the weight a cutout edge should carry anyway. */
+.driver-overlay path {
+  stroke: var(--structure-hi);
+  stroke-width: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .driver-popover.dragonfly-tour,
+  .driver-fade .driver-popover.dragonfly-tour {
+    animation: none;
+  }
+}

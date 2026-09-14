@@ -76,7 +76,10 @@ export function HealthRail() {
   });
 
   return (
-    <section className="border-border flex w-[220px] shrink-0 flex-col border-r">
+    <section
+      data-tour="ops-health"
+      className="border-border flex w-[220px] shrink-0 flex-col border-r"
+    >
       <div className="border-border flex h-7 shrink-0 items-center border-b px-[14px]">
         <span className="label-micro">Subsystem health</span>
       </div>
