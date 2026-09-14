@@ -73,7 +73,10 @@ export function Simulate() {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="border-border flex h-9 shrink-0 items-center gap-1 border-b px-3">
+      <div
+        data-tour="simulate-profile"
+        className="border-border flex h-9 shrink-0 items-center gap-1 border-b px-3"
+      >
         <span className="t-section text-muted-foreground mr-2">PROFILE</span>
         {PRESETS.map((one) => (
           <Button

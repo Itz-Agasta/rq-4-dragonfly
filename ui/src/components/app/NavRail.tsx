@@ -25,8 +25,15 @@
 import { useEffect } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router";
 
-import { AboutGlyph, Mark, SCREEN_GLYPHS, SettingsGlyph } from "@/components/app/glyphs";
+import {
+  AboutGlyph,
+  GuideGlyph,
+  Mark,
+  SCREEN_GLYPHS,
+  SettingsGlyph,
+} from "@/components/app/glyphs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { startScreenTour } from "@/lib/tour";
 import { type ScreenId, SCREENS, screenHasUnacknowledged, useApp } from "@/store/app";
 
 const LABELS: Record<ScreenId, string> = {
@@ -138,6 +145,40 @@ function UtilityCell({
 }
 
 /**
+ * GUIDE runs the walkthrough for the screen that is showing.
+ *
+ * Per screen rather than the whole product: three to five steps complete at
+ * roughly 72% where a twenty-three step run completes at 16%, and someone
+ * pressing this on ANALYSIS wants ANALYSIS, not to be taken back to OPS. The
+ * full walk is one button away on the first-visit intro.
+ *
+ * A real cell rather than a disabled one, and above ABOUT so the two ways of
+ * asking "what is this" sit together: this one answers from inside the
+ * application and ABOUT answers by leaving it.
+ */
+function GuideCell({ onStart }: { onStart: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={onStart}
+          data-tour="rail-guide"
+          className={`${CELL} text-structure hover:bg-popover hover:text-muted-foreground`}
+          aria-label="GUIDE, starts the walkthrough"
+        >
+          <GuideGlyph />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right" sideOffset={6}>
+        GUIDE
+        <span className="text-foreground-dim ml-2">this screen · ?</span>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
  * ABOUT opens the source.
  *
  * A new tab, not a panel: nothing written here beats the repository at
@@ -179,6 +220,12 @@ export function NavRail() {
       if (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? "")) {
         return;
       }
+      // `?` is shift-/ on most layouts, so the modifier guard above cannot be
+      // extended to shift without losing it.
+      if (event.key === "?") {
+        startScreenTour((to) => void navigate(to));
+        return;
+      }
       const index = Number.parseInt(event.key, 10);
       if (index >= 1 && index <= SCREENS.length) {
         void navigate(`/${SCREENS[index - 1]}`);
@@ -189,7 +236,11 @@ export function NavRail() {
   }, [navigate]);
 
   return (
-    <nav className="border-border flex w-12 shrink-0 flex-col border-r" aria-label="Screens">
+    <nav
+      data-tour="rail"
+      className="border-border flex w-12 shrink-0 flex-col border-r"
+      aria-label="Screens"
+    >
       <div className="border-border text-foreground flex h-10 items-center justify-center border-b">
         <Mark size={22} />
         <span className="sr-only">RQ-4 DRAGONFLY</span>
@@ -202,6 +253,7 @@ export function NavRail() {
       <div className="min-h-6 flex-1" />
 
       <UtilityCell label="SETTINGS" Glyph={SettingsGlyph} />
+      <GuideCell onStart={() => startScreenTour((to) => void navigate(to))} />
       <SourceCell />
     </nav>
   );

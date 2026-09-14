@@ -231,7 +231,7 @@ export function Fleet() {
 
           {/* Rows share the leftover height; at a fixed pitch eight of them
               leave a third of the screen empty. */}
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          <div data-tour="fleet-roster" className="flex min-h-0 flex-1 flex-col overflow-y-auto">
             {ROSTER.map((one) => (
               <Row
                 key={one.tail}

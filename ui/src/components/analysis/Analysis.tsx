@@ -31,7 +31,7 @@ export function Analysis() {
       <div className="lattice min-h-0 min-w-0 flex-1 grid-cols-[300px_minmax(0,1fr)_340px]">
         <Hypotheses data={data} />
         <div className="flex min-h-0 min-w-0 flex-col">
-          <div className="min-h-0 flex-1">
+          <div data-tour="analysis-matrix" className="min-h-0 flex-1">
             <Matrix data={data} />
           </div>
           <div className="h-[300px] shrink-0">

@@ -19,7 +19,10 @@ export function Ops() {
       <div className="flex min-h-0 min-w-0 flex-1 items-stretch">
         <HealthRail />
         <Schematic />
-        <aside className="border-border flex w-[420px] min-w-0 shrink-0 flex-col border-l">
+        <aside
+          data-tour="ops-alerts"
+          className="border-border flex w-[420px] min-w-0 shrink-0 flex-col border-l"
+        >
           <AlertStack />
           <Advisory />
         </aside>

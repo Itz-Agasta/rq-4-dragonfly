@@ -123,7 +123,7 @@ export function HealthParams({ parameters }: { parameters: Parameter[] }) {
   });
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <div data-tour="twin-params" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <div className="border-border flex h-[36px] shrink-0 items-center justify-between gap-[10px] border-b px-4">
         <span className="t-section truncate whitespace-nowrap">
           EST. HEALTH PARAMS

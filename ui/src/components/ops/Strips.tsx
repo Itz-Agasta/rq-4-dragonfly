@@ -101,7 +101,10 @@ export function Strips() {
   const chtAlarm = useMemo(() => spreadAlarm((f: Frame) => f.cht_k, fault), [fault]);
 
   return (
-    <div className="border-border grid min-h-0 shrink-0 basis-[26%] grid-cols-3 grid-rows-2 border-t">
+    <div
+      data-tour="ops-strips"
+      className="border-border grid min-h-0 shrink-0 basis-[26%] grid-cols-3 grid-rows-2 border-t"
+    >
       <div className="border-border min-h-0 min-w-0 border-r border-b">
         <Strip title="RPM · crank" readout="rpm" series={RPM_SERIES} syncKey={SYNC} minSpan={60} />
       </div>

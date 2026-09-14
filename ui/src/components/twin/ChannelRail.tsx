@@ -65,7 +65,7 @@ export function ChannelRail({ selected, onSelect }: ChannelRailProps) {
   });
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+    <div data-tour="twin-rail" className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
       <div className="border-border flex h-[28px] shrink-0 items-center justify-between border-b px-[14px]">
         <span className="label-micro">Channels</span>
         {/* Lower case sigma, so it is not uppercased into a summation sign by

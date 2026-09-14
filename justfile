@@ -77,8 +77,12 @@ build-ui:
 # it does not quieten the console and is not meant to. chromium's own
 # DEPRECATED_ENDPOINT and wayland/vulkan lines appear on a clean profile too, and
 # neither is this application: measured 59.4 fps on this bundle with both present.
+#
+# ?kiosk=1 suppresses the first-visit guided tour. the throwaway profile means
+# localStorage is empty on every boot, so without it the tour opens itself in
+# front of the room each time. the rail's GUIDE cell still runs it on request.
 kiosk: build-ui
-    chromium --app=http://127.0.0.1:8787 --start-fullscreen \
+    chromium --app='http://127.0.0.1:8787/?kiosk=1' --start-fullscreen \
         --user-data-dir=/tmp/dragonfly-kiosk
 
 # prove frames are actually on the wire. the D5 acceptance test.

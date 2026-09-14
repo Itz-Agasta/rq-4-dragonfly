@@ -81,7 +81,10 @@ export function DetectionBar() {
   });
 
   return (
-    <div className="border-border bg-card flex shrink-0 items-stretch border-b">
+    <div
+      data-tour="analysis-detection"
+      className="border-border bg-card flex shrink-0 items-stretch border-b"
+    >
       <Field label="detector">
         <span ref={state} role="status" className="t-small text-foreground">
           {NO_VALUE}

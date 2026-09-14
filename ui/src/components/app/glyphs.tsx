@@ -180,6 +180,24 @@ function EvidenceGlyph({ className }: GlyphProps) {
   );
 }
 
+/**
+ * The guided tour.
+ *
+ * A bare question mark, which {@link EvidenceGlyph} above turned down precisely
+ * because it says "help": that is what this cell is, and it is the one glyph on
+ * the rail whose meaning nobody has to learn. Unenclosed, so it does not read as
+ * a second {@link AboutGlyph}. The dot is a short stroke rather than a circle;
+ * at `r="0.75"` a dot renders as a smudge beside 1.5px line-art.
+ */
+function GuideGlyph({ className }: GlyphProps) {
+  return (
+    <Frame className={className}>
+      <path d="M6.9 7.3a3.1 3.1 0 1 1 3.1 3.3v1.5" />
+      <path d="M10 14.6v1.4" />
+    </Frame>
+  );
+}
+
 export const SCREEN_GLYPHS: Record<ScreenId, (props: GlyphProps) => React.ReactElement> = {
   ops: OpsGlyph,
   twin: TwinGlyph,
@@ -190,4 +208,4 @@ export const SCREEN_GLYPHS: Record<ScreenId, (props: GlyphProps) => React.ReactE
   evidence: EvidenceGlyph,
 };
 
-export { AboutGlyph, Mark, SettingsGlyph };
+export { AboutGlyph, GuideGlyph, Mark, SettingsGlyph };

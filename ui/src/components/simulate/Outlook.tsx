@@ -33,7 +33,10 @@ export function Outlook({ projection, preset }: { projection: Projection; preset
   const altitude = scaleOf(projection.altitude_ft.map((ft) => ft / 1000));
 
   return (
-    <div className="border-border flex w-[260px] shrink-0 flex-col overflow-hidden border-r">
+    <div
+      data-tour="simulate-outlook"
+      className="border-border flex w-[260px] shrink-0 flex-col overflow-hidden border-r"
+    >
       <div className="border-border flex h-9 shrink-0 items-center border-b px-4">
         <span className="t-section">PROJECTED LEG</span>
       </div>
