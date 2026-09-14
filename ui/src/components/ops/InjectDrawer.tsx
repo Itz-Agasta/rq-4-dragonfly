@@ -34,9 +34,17 @@
  * The press then has to be confirmed. A fault runs until CLEAR ALL and the slow
  * presets take half an hour to reach severity, so a mis-press costs the
  * demonstration rather than a keystroke.
+ *
+ * # Confirming closes the drawer, and the answer moves to a toast
+ *
+ * A 420px sheet covers the schematic and a third of the strips, which is
+ * precisely what somebody who just commanded a fault wants to look at. So the
+ * drawer closes on confirm and `@/store/toast` carries the confirmation, which
+ * outlives it. The footer line that used to report this is gone: at 10px inside
+ * a panel the operator was about to shut, it was read by nobody.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Field } from "@/components/Field";
 import {
@@ -50,6 +58,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
 import {
   Sheet,
   SheetContent,
@@ -58,8 +67,10 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { report } from "@/lib/report";
 import { CYLINDERS } from "@/lib/telemetry";
+import { toast } from "@/store/toast";
 
 /** Mirrors `FaultKind` in `dronecan-ice`. The wire carries the number. */
 const KIND = {
@@ -166,9 +177,12 @@ const PRESETS: readonly Preset[] = [
  *
  * Confirmed like the rest even though it is the safe direction, because it is
  * not free: an instantaneous jump in a health parameter is not something a
- * filter tracks smoothly, so the twin raises `lost lock` on every clear and
- * takes seconds to come back. That belongs on the card rather than in a
- * handover nobody reads mid-demonstration.
+ * filter tracks smoothly, so the twin raises `lost lock` on every clear. It is
+ * not quick. Measured on vcan0 after clearing a 18% misfire on cylinder 3: lock
+ * returned at 22 s, and the subsystem scores were still climbing at 38 s
+ * (combustion 89 of a pre-fault 95). The toast carries that figure, because an
+ * operator who clears a fault and sees nothing move for twenty seconds
+ * reasonably concludes the command was lost.
  */
 const CLEAR: Preset = {
   kind: KIND.clear,
@@ -195,14 +209,38 @@ function command(preset: Preset, cylinder: number) {
   };
 }
 
+/**
+ * A cylinder with a spark leaving it.
+ *
+ * Drawn here rather than in `app/glyphs.tsx`, which is the rail's set and is
+ * documented as such. Same hand: 1.5px strokes, no fill, no rounded joins.
+ */
+function InjectGlyph() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="13"
+      height="13"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="butt"
+      aria-hidden="true"
+    >
+      <path d="M2.5 5.5h6v8h-6z" />
+      <path d="M11 2.5l-2.5 4h4l-2.5 4" />
+    </svg>
+  );
+}
+
 /** One row as the clear card names it back. */
 function faultName(preset: Preset, cylinder: number): string {
   return preset.perCylinder ? `${preset.label} · cyl ${cylinder}` : preset.label;
 }
 
 export function InjectDrawer() {
+  const [open, setOpen] = useState(false);
   const [cylinder, setCylinder] = useState(3);
-  const [sent, setSent] = useState<string | null>(null);
   /** The preset the confirmation card is holding, or null when it is closed. */
   const [pending, setPending] = useState<Preset | null>(null);
   /**
@@ -215,7 +253,28 @@ export function InjectDrawer() {
    */
   const [commanded, setCommanded] = useState<string[]>([]);
 
+  // `F` opens the drawer. Teammates could not find the button on the schematic
+  // header, and a key is the affordance that survives someone else driving.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? "")) {
+        return;
+      }
+      if (event.key === "f" || event.key === "F") setOpen((was) => !was);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const inject = (preset: Preset) => {
+    const clearing = preset.kind === KIND.clear;
+    // Closed before the request resolves, not after. The sheet covers the
+    // schematic and a third of the strips, and the point of pressing this is to
+    // watch those; the toast reports the outcome either way.
+    setOpen(false);
+
     void fetch("/api/fault", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -225,28 +284,46 @@ export function InjectDrawer() {
         // The core answers 503 when the queue has backed up, which means the bus
         // is down. Saying so beats a control that looks like it worked.
         if (!response.ok) {
-          setSent("no route to the bus");
+          toast("No route to the bus", "Nothing was commanded. Check the CAN link.", "crit");
           return;
         }
         const name = faultName(preset, cylinder);
-        setSent(`${name} commanded`);
-        setCommanded((held) =>
-          preset.kind === KIND.clear ? [] : held.includes(name) ? held : [...held, name],
-        );
+        if (clearing) {
+          toast(
+            "All faults cleared",
+            "The engine is nominal now. The twin re-locks in about 20 s and the health scores follow.",
+          );
+        } else {
+          toast(`${name} commanded`, preset.note);
+        }
+        setCommanded((held) => (clearing ? [] : held.includes(name) ? held : [...held, name]));
       })
       .catch((error: unknown) => {
         report("fault command failed", error);
-        setSent("no route to the bus");
+        toast("No route to the bus", "Nothing was commanded. Check the CAN link.", "crit");
       });
   };
 
   return (
-    <Sheet>
-      <SheetTrigger asChild>
-        <Button size="sm" className="shrink-0">
-          INJECT FAULT
-        </Button>
-      </SheetTrigger>
+    <Sheet open={open} onOpenChange={setOpen}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <SheetTrigger asChild>
+            {/* Full size rather than `sm`, and carrying a glyph. Teammates
+                could not find this: at 7px tall beside two lines of dim label
+                text it read as part of the panel heading rather than as the one
+                control on the screen. */}
+            <Button className="shrink-0 gap-[9px]" data-tour="ops-inject">
+              <InjectGlyph />
+              INJECT FAULT
+            </Button>
+          </SheetTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>
+          Command a fault on the simulator
+          <Kbd className="ml-2">F</Kbd>
+        </TooltipContent>
+      </Tooltip>
       <SheetContent side="right" className="w-[420px] sm:max-w-[420px]">
         <SheetHeader>
           <SheetTitle className="t-section">INJECT FAULT</SheetTitle>
@@ -300,8 +377,10 @@ export function InjectDrawer() {
         </div>
 
         <div className="flex items-center justify-between gap-3 px-4 py-3">
-          <span className="label-micro min-w-0 truncate normal-case" role="status">
-            {sent ?? "nothing commanded this session"}
+          <span className="label-micro min-w-0 truncate normal-case">
+            {commanded.length === 0
+              ? "nothing commanded this session"
+              : `${commanded.length} running`}
           </span>
           <Button size="sm" variant="ghost" className="shrink-0" onClick={() => setPending(CLEAR)}>
             CLEAR ALL
