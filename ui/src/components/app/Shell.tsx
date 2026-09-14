@@ -25,6 +25,7 @@ const TITLES: Record<string, string> = {
   simulate: "SIMULATE",
   replay: "REPLAY",
   fleet: "FLEET",
+  evidence: "EVIDENCE",
 };
 
 export function Shell() {

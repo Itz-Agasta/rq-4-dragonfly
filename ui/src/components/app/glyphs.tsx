@@ -163,6 +163,23 @@ function AboutGlyph({ className }: GlyphProps) {
   );
 }
 
+/**
+ * A sheet with a rule under its heading and a mark in the margin.
+ *
+ * Reads as a document beside six instrument glyphs, which is the distinction
+ * that matters: this screen is read, not watched. Deliberately not a book, not a
+ * question mark and not an `i` in a circle, all of which say "help" rather than
+ * "the evidence for what the other six are telling you".
+ */
+function EvidenceGlyph({ className }: GlyphProps) {
+  return (
+    <Frame className={className}>
+      <path d="M4.5 2.5h11v15h-11z" />
+      <path d="M7 6.5h6M7 10h6M7 13.5h3.5" />
+    </Frame>
+  );
+}
+
 export const SCREEN_GLYPHS: Record<ScreenId, (props: GlyphProps) => React.ReactElement> = {
   ops: OpsGlyph,
   twin: TwinGlyph,
@@ -170,6 +187,7 @@ export const SCREEN_GLYPHS: Record<ScreenId, (props: GlyphProps) => React.ReactE
   simulate: SimulateGlyph,
   replay: ReplayGlyph,
   fleet: FleetGlyph,
+  evidence: EvidenceGlyph,
 };
 
 export { AboutGlyph, Mark, SettingsGlyph };
