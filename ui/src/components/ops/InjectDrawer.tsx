@@ -262,7 +262,15 @@ export function InjectDrawer() {
       if (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? "")) {
         return;
       }
-      if (event.key === "f" || event.key === "F") setOpen((was) => !was);
+      if (event.key !== "f" && event.key !== "F") return;
+      // Drop any armed confirmation. This toggle sets the controlled prop
+      // directly, so Radix never fires `onOpenChange` and the card's own cancel
+      // never runs; `pending` would survive the close and the next press would
+      // reopen onto a confirmation for a fault the operator walked away from,
+      // one click from committing it. Every other close path is a card the
+      // dialog owns, which does clear it.
+      setPending(null);
+      setOpen((was) => !was);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
