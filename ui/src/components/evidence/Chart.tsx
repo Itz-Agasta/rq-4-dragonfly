@@ -53,18 +53,29 @@ let pending: Promise<ChartSpec[]> | null = null;
 
 export function useCharts(): Map<string, ChartSpec> {
   const [charts, setCharts] = useState<Map<string, ChartSpec>>(new Map());
+
   useEffect(() => {
-    pending ??= fetch("/validation/charts.json")
-      .then((r) => (r.ok ? (r.json() as Promise<ChartSpec[]>) : []))
-      .catch(() => []);
-    let live = true;
-    void pending.then((specs) => {
-      if (live) setCharts(new Map(specs.map((x) => [x.id, x])));
+    // **Only a success is cached.** Caching the rejection too meant one failed
+    // request left every figure blank for the rest of the session, with the
+    // core restarting under a reader being enough to do it.
+    pending ??= fetch("/validation/charts.json").then((r) => {
+      if (!r.ok) throw new Error(`charts.json: ${r.status}`);
+      return r.json() as Promise<ChartSpec[]>;
     });
+
+    let live = true;
+    void pending
+      .then((specs) => {
+        if (live) setCharts(new Map(specs.map((x) => [x.id, x])));
+      })
+      .catch(() => {
+        pending = null;
+      });
     return () => {
       live = false;
     };
   }, []);
+
   return charts;
 }
 
@@ -100,6 +111,22 @@ function stroke(series: ChartSeries, solidIndex: number): string {
 }
 const HEIGHT = 340;
 const byX = bisector<[number, number], number>((d) => d[0]).center;
+
+/**
+ * The sample of `series` nearest `x`, or null where the series has no data.
+ *
+ * A curve that stops at 11.57 bar has nothing to say about 18 bar, and
+ * reporting its last point there would put two operating points on one row of
+ * the readout. Half a sample interval of slack, so the endpoints stay readable.
+ */
+function sampleAt(series: ChartSeries, x: number): [number, number] | null {
+  const pts = series.points;
+  if (pts.length === 0) return null;
+  const p = pts[byX(pts, x)];
+  if (!p) return null;
+  const span = pts.length > 1 ? Math.abs(pts[1][0] - pts[0][0]) : 0;
+  return Math.abs(p[0] - x) <= span ? p : null;
+}
 
 /** Width from the container, so the plot fills whatever the pane gives it. */
 function useWidth(ref: React.RefObject<HTMLDivElement | null>) {
@@ -173,8 +200,6 @@ export function Chart({ spec, caption }: { spec: ChartSpec; caption: string }) {
     return { x, y, path, xTicks, yTicks, fx: axisFormat(xTicks), fy: axisFormat(yTicks) };
   }, [spec, width]);
 
-  // The series carrying the hover readout is the first solid one: the dashed
-  // series are limits and references, and a limit has no value worth probing.
   const solidOrder = useMemo(() => {
     const order = new Map<string, number>();
     let n = 0;
@@ -184,8 +209,17 @@ export function Chart({ spec, caption }: { spec: ChartSpec; caption: string }) {
     return order;
   }, [spec]);
 
-  const probe = spec.series.find((s) => !s.dashed) ?? spec.series[0];
-  const index = hover === null || !probe ? null : byX(probe.points, plot.x.invert(hover));
+  /**
+   * Where the crosshair sits, in data coordinates.
+   *
+   * **Driven by the pointer, not by one series' samples.** Snapping to the
+   * nearest sample of the first solid series was the first attempt, and it
+   * breaks the moment two series cover different ranges: on the BSFC figure the
+   * 2200 rpm curve ends at 11.57 bar while the others reach 22, so the
+   * crosshair stopped dead there and the right half of the plot could not be
+   * inspected at all.
+   */
+  const at = hover === null ? null : plot.x.invert(hover);
 
   return (
     <figure className="border-border mx-auto flex w-full max-w-[1100px] min-w-0 flex-col border">
@@ -274,11 +308,11 @@ export function Chart({ spec, caption }: { spec: ChartSpec; caption: string }) {
               />
             ))}
 
-            {index !== null && probe?.points[index] ? (
+            {at !== null ? (
               <g>
                 <line
-                  x1={plot.x(probe.points[index][0])}
-                  x2={plot.x(probe.points[index][0])}
+                  x1={plot.x(at)}
+                  x2={plot.x(at)}
                   y1={MARGIN.top}
                   y2={HEIGHT - MARGIN.bottom}
                   stroke="var(--structure-hi)"
@@ -286,7 +320,7 @@ export function Chart({ spec, caption }: { spec: ChartSpec; caption: string }) {
                 {spec.series
                   .filter((s) => !s.dashed)
                   .map((s) => {
-                    const p = s.points[byX(s.points, probe.points[index][0])];
+                    const p = sampleAt(s, at);
                     return p ? (
                       <circle
                         key={s.label}
@@ -327,7 +361,7 @@ export function Chart({ spec, caption }: { spec: ChartSpec; caption: string }) {
         )}
       </div>
 
-      <Readout spec={spec} probe={probe} index={index} solidOrder={solidOrder} />
+      <Readout spec={spec} at={at} solidOrder={solidOrder} />
 
       <figcaption className="border-border text-muted-foreground border-t px-4 py-2.5 text-[12px] leading-[1.6]">
         {caption}
@@ -346,31 +380,30 @@ export function Chart({ spec, caption }: { spec: ChartSpec; caption: string }) {
  */
 function Readout({
   spec,
-  probe,
-  index,
+  at,
   solidOrder,
 }: {
   spec: ChartSpec;
-  probe: ChartSeries | undefined;
-  index: number | null;
+  /** Pointer position in data coordinates, or null when not hovering. */
+  at: number | null;
   solidOrder: Map<string, number>;
 }) {
-  const at = index !== null && probe ? probe.points[index] : undefined;
-
   return (
     <div className="border-border text-muted-foreground flex flex-wrap items-baseline gap-x-5 gap-y-1 border-t px-4 py-2 text-[12px]">
-      {at ? (
+      {at !== null ? (
         <>
           <span className="num text-foreground">
-            {spec.xAxis.split(",")[0]} {tick(at[0])}
+            {spec.xAxis.split(",")[0]} {tick(at)}
           </span>
           {/* Model output only. A reference line is a limit, and a vertical one
               has no y to read at a given x: probing the critical-altitude marker
-              returned the top of its own line and printed it as a power. */}
+              returned the top of its own line and printed it as a power.
+              A series that does not reach this x is omitted rather than shown
+              at its own endpoint under someone else's operating point. */}
           {spec.series
             .filter((s) => !s.dashed)
             .map((s) => {
-              const p = s.points[byX(s.points, at[0])];
+              const p = sampleAt(s, at);
               return p ? (
                 <span key={s.label} className="num">
                   {s.label} <span className="text-foreground">{tick(p[1])}</span>
