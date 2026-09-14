@@ -17,6 +17,8 @@ fmt-ui:
 
 lint-ui:
     pnpm exec oxlint
+    # a tour step past ~25 words stops being scanned and starts being dismissed
+    node ui/scripts/tour-lint.mjs
 
 # formats in place, then lints. run before calling a coding session done.
 check: fmt-rust fmt-ui lint-rust lint-ui
