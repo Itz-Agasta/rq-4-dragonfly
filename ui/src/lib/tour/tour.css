@@ -119,7 +119,9 @@
   height: 24px;
   font-size: 15px;
   font-weight: 400;
-  color: var(--structure);
+  /* Not --structure, which index.css reserves for line-work: on a screen tour's
+     first step this is the only way out, so it has to be findable. */
+  color: var(--muted-foreground);
   transition: color 150ms;
 }
 
@@ -143,7 +145,9 @@
   line-height: 1.2;
   letter-spacing: var(--tracking-label);
   font-variant-numeric: tabular-nums;
-  color: var(--foreground-dim);
+  /* --foreground-dim is 3.92:1 and scoped to graphics and disabled states in
+     index.css. This is a label at 10px, so it takes the label colour. */
+  color: var(--muted-foreground);
 }
 
 .driver-popover.dragonfly-tour .driver-popover-footer-btn {
@@ -180,7 +184,7 @@
 
 .driver-popover.dragonfly-tour .driver-popover-btn-disabled {
   opacity: 1;
-  color: var(--structure);
+  color: var(--foreground-dim);
   border-color: var(--border);
 }
 
@@ -194,8 +198,11 @@
    obvious default. */
 .driver-popover.dragonfly-tour .driver-skip-btn,
 .driver-popover.dragonfly-tour .driver-alt-btn {
+  /* Quiet by losing the border, not by dimming the text. --structure is 2.05:1
+     and index.css scopes it to schematic line-work, never to a label someone is
+     expected to read. NEXT stays the obvious default on its brighter edge. */
   border-color: transparent;
-  color: var(--structure);
+  color: var(--muted-foreground);
 }
 
 /* Only the leftmost pushes the navigation buttons across, or the gap opens
