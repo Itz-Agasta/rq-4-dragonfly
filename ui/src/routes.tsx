@@ -1,7 +1,7 @@
 /**
  * Route table.
  *
- * Six screens, one shell. The shell holds the socket, so these are swapped
+ * Seven screens, one shell. The shell holds the socket, so these are swapped
  * beneath a feed that never restarts.
  */
 
@@ -9,6 +9,7 @@ import { createBrowserRouter, Navigate } from "react-router";
 
 import { Analysis } from "@/components/analysis/Analysis";
 import { Shell } from "@/components/app/Shell";
+import { Evidence } from "@/components/evidence/Evidence";
 import { Fleet } from "@/components/fleet/Fleet";
 import { Ops } from "@/components/ops/Ops";
 import { Replay } from "@/components/replay/Replay";
@@ -27,6 +28,7 @@ export const router = createBrowserRouter([
       { path: "simulate", element: <Simulate /> },
       { path: "replay", element: <Replay /> },
       { path: "fleet", element: <Fleet /> },
+      { path: "evidence", element: <Evidence /> },
     ],
   },
 ]);

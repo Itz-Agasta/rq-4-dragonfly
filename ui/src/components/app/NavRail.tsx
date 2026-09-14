@@ -18,7 +18,7 @@
  * The one accent the rail may show is a 4px corner square meaning the screen has
  * an unacknowledged alert, which is still the alarm meaning.
  *
- * Keys 1 to 6 switch screens, because a rehearsed demo should never depend on
+ * Keys 1 to 7 switch screens, because a rehearsed demo should never depend on
  * hitting a click target.
  */
 
@@ -36,6 +36,7 @@ const LABELS: Record<ScreenId, string> = {
   simulate: "SIMULATE",
   replay: "REPLAY",
   fleet: "FLEET",
+  evidence: "EVIDENCE",
 };
 
 /** Where ABOUT goes. */

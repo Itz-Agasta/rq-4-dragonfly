@@ -174,6 +174,18 @@ pub fn chart(
         (T + H - B) / 2.0
     );
 
+    // Legend block sized from the longest label rather than fixed. A fixed 150px
+    // block clipped "demonstrated containment" at the plot edge, and the clipping
+    // was invisible in the document because the glyphs simply stopped.
+    // 6.65 px per character is Geist Mono at 11px, measured, not the metric.
+    let legend_w = series
+        .iter()
+        .map(|s| s.label.chars().count())
+        .max()
+        .unwrap_or(0) as f64
+        * 6.65
+        + 36.0;
+
     for (i, series) in series.iter().enumerate() {
         let stroke = STROKES[i % STROKES.len()];
         let dash = if series.dashed {
@@ -196,9 +208,9 @@ pub fn chart(
             s,
             r#"<line x1="{:.0}" y1="{ly:.0}" x2="{:.0}" y2="{ly:.0}" stroke="{stroke}" stroke-width="2"{dash}/>
 <text x="{:.0}" y="{:.0}" fill="{DIM}" font-size="11">{}</text>"#,
-            W - R - 150.0,
-            W - R - 126.0,
-            W - R - 120.0,
+            W - R - legend_w,
+            W - R - legend_w + 24.0,
+            W - R - legend_w + 30.0,
             ly + 4.0,
             series.label
         );

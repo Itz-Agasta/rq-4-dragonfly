@@ -11,7 +11,15 @@ import { create } from "zustand";
 import type { Health } from "@/lib/health";
 import type { LinkState } from "@/lib/telemetry";
 
-export const SCREENS = ["ops", "twin", "analysis", "simulate", "replay", "fleet"] as const;
+export const SCREENS = [
+  "ops",
+  "twin",
+  "analysis",
+  "simulate",
+  "replay",
+  "fleet",
+  "evidence",
+] as const;
 
 export type ScreenId = (typeof SCREENS)[number];
 
