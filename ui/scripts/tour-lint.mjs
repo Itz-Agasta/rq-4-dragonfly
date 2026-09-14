@@ -11,9 +11,23 @@
 // `steps.ts`. That works only because the file's single import is `import
 // type`, which strips to nothing; a value import would need a resolver.
 //
+// The version guard runs before that import rather than beside it, because a
+// static import is hoisted and an older Node fails on the `.ts` extension with
+// a SyntaxError that says nothing about why. `just check` is a required step,
+// so it owes anyone on an older runtime an actionable line.
+//
 // https://www.chameleon.io/blog/onboarding-ux-patterns
 
-import { TOUR } from "../src/lib/tour/steps.ts";
+const [major, minor] = process.versions.node.split(".").map(Number);
+if (major < 22 || (major === 22 && minor < 18)) {
+  console.error(
+    `tour-lint: needs Node >= 22.18 to read steps.ts, found ${process.versions.node}.\n` +
+      "See the engines field in package.json.",
+  );
+  process.exit(1);
+}
+
+const { TOUR } = await import("../src/lib/tour/steps.ts");
 
 const MAX_WORDS = 25;
 const MAX_CHARS = 180;
