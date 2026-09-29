@@ -1,0 +1,90 @@
+{
+  "keyframes_dir": "site/gen/keyframes/locked",
+  "seam_rule": "a chained shot's first frame is the real last frame of the rendered previous clip, extracted with ffmpeg -sseof, never the original still",
+  "shots": [
+    {
+      "id": "S1",
+      "sec": 8,
+      "engine": "minimax/h3 2K",
+      "first": "S1_first.png",
+      "last": "S1_last.png",
+      "move": "descend through haze, tilt up, aircraft glides in and settles on the master composition",
+      "status": "master_locked",
+      "source": "video/S1_0.mp4",
+      "master": "site/gen/masters/S1.mp4"
+    },
+    {
+      "id": "S2",
+      "sec": 8,
+      "engine": "minimax/h3 2K",
+      "first": "chain:S1",
+      "last": "S2_last.png",
+      "move": "slow orbit toward the rear and push in on the engine bay as the cowl opens to a cutaway",
+      "status": "master_locked",
+      "source": "video/S2_0.mp4",
+      "master": "site/gen/masters/S2.mp4"
+    },
+    {
+      "id": "S3",
+      "sec": 6,
+      "engine": "minimax/h3 2K",
+      "first": "S3_first.png",
+      "last": "S3_last.png",
+      "move": "locked macro, carbon grows on the nozzle, spray thins, one jet blocks",
+      "status": "master_locked",
+      "source": "video/S3_0.mp4",
+      "master": "site/gen/masters/S3.mp4"
+    },
+    {
+      "id": "S4",
+      "sec": 8,
+      "engine": "gemini-omni-1.1-flash 720p, lanczos to 1080p locally",
+      "first": "pov/S4p_first_b.png",
+      "move": "nose-cam POV: level over the canyon, engine dies, pitch down and roll left into the canyon, rock fills frame; page cuts to black",
+      "status": "master_locked",
+      "source": "video/S4_omni_720_a.mp4",
+      "master": "site/gen/masters/S4.mp4",
+      "rejected": [
+        "Seedance 2.0 with end frame: bobbed down and back up",
+        "Omni 720p take b: hard cut at 4.9 s (scene score 0.18)"
+      ]
+    },
+    {
+      "id": "S5",
+      "sec": 0,
+      "engine": "none",
+      "note": "rewind: S4 then S2 frames played in reverse"
+    },
+    {
+      "id": "S6",
+      "sec": 0,
+      "engine": "none",
+      "note": "twin drawn as SVG hairlines traced from S2 last frame; generated overlay rejected (edit barely changed the frame)"
+    },
+    {
+      "id": "S9",
+      "sec": 8,
+      "engine": "minimax/h3 2K",
+      "first": "S9_first.png",
+      "last": "S9_last.png",
+      "move": "steady climb through the cloud deck to 32,000 ft",
+      "status": "master_locked",
+      "source": "video/S9_0.mp4",
+      "master": "site/gen/masters/S9.mp4"
+    },
+    {
+      "id": "S10",
+      "sec": 6,
+      "engine": "minimax/h3 2K",
+      "first": "S10_first.png",
+      "last": "S10_last.png",
+      "move": "slow dolly in to the monitor wall",
+      "status": "master_locked",
+      "source": "video/S10_0.mp4",
+      "master": "site/gen/masters/S10.mp4"
+    }
+  ],
+  "seams": {
+    "S1->S2": "SSIM 0.907, hide with a 4-frame crossfade"
+  }
+}
