@@ -34,6 +34,16 @@ export function startScroll() {
 }
 
 /**
+ * Holds the page still while the loader is up. Without Lenis (reduced motion) the
+ * document itself stops scrolling.
+ */
+export function holdScroll(hold: boolean) {
+  if (lenis && hold) lenis.stop();
+  else if (lenis) lenis.start();
+  document.documentElement.style.overflow = hold ? "hidden" : "";
+}
+
+/**
  * Recording mode (`?record`): one constant-speed pass from top to bottom, for a
  * screen capture. Linear on purpose: an eased scroll lingers at the ends and rushes
  * the middle, which is where the story is.

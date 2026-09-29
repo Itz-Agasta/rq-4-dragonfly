@@ -9,7 +9,7 @@ import { Scene } from "./Scene";
 /** Cold open: descent through the haze, the aircraft settles into frame. */
 export function Hero() {
   return (
-    <Scene vh={460} map={linear("S1")} preload={["S1", "S2"]} id="top">
+    <Scene vh={460} map={linear("S1")} preload={["S1"]} id="top">
       <div className="lower" data-at="-1,0.24">
         <h1 className="h1">
           Engine faults start
