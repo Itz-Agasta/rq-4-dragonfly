@@ -1,0 +1,19 @@
+site/src/film/scroll.ts
+  s_cb70e7da792df7::t_e6acadab85613c 163-170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f71ab8c7c2d3ca04ad5136990d36b89dc7161589",
+  "prompts": {},
+  "sessions": {
+    "s_cb70e7da792df7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "837e4a02-4c3f-453a-a4c4-1ddf05c52b33",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Itz-Agasta <rupamgolui69@gmail.com>"
+    }
+  }
+}
