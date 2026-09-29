@@ -160,6 +160,14 @@ export function scrub(
     stage.style.opacity = "0";
   };
   const update = (st: ScrollTrigger) => {
+    // A jump (an anchor link, a restored position) can carry the scroll clean over
+    // a scene; ScrollTrigger still reports its progress change but never activates
+    // it, so without this the skipped stage stays up, and an opaque one covers the
+    // film. Only the last scene stays up past its end, behind the footer.
+    if (!st.isActive && !(!isScene(next) && st.progress === 1)) {
+      hide();
+      return;
+    }
     const f = F();
     const y = st.scroll();
     const top = st.start + f; // where this scene's own span begins
