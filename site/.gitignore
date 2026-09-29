@@ -1,0 +1,5 @@
+gen/
+public/frames/
+node_modules/
+dist/
+public/media/

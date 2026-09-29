@@ -1,5 +1,6 @@
 packages:
   - ui
+  - site
   # a tauri shell package gets listed here when packaging becomes real
   # (plan.md ADR-1 keeps it a stretch goal, chromium kiosk is the demo path)
 
