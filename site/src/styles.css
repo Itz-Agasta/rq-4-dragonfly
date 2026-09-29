@@ -1,0 +1,977 @@
+@import "@fontsource-variable/geist-mono";
+
+/* Tokens copied from ui/src/index.css so the site and the ground station read as one
+   product. Same rule as the GCS: one accent, luminance is data, colour is alarm. */
+:root {
+  --bg: #000;
+  --fg: #f0f0f2;
+  --muted: #8e8e96;
+  --dim: #6e6e76;
+  --structure: #3a3a40;
+  --structure-hi: #55555c;
+  --border: #232326;
+  --primary: #ff6b35;
+  --crit: #ff453a;
+  --font: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
+  --gutter: clamp(16px, 4vw, 64px);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+html {
+  background: var(--bg);
+}
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+a {
+  color: inherit;
+}
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Lenis owns scrolling; these are its documented base styles. */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+.lenis:not(.lenis-autoToggle).lenis-stopped {
+  overflow: clip;
+}
+
+#film {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+  display: block;
+}
+
+/* Each scene is a tall scroll track with a sticky viewport-sized stage inside. */
+.scene {
+  position: relative;
+  z-index: 1;
+}
+.stage {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 1;
+  /* vh, never svh: the fixed canvas is 100vh, and the frame-locked SVGs only register
+     on the footage if the stage crops the frame exactly as the canvas does. */
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Legibility over footage: one constant vignette above the film and below every
+   stage, a darker floor where the copy sits and a lid where the nav sits. Opaque
+   stages simply cover it. */
+.vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(to top, rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0.2) 36%, transparent 58%),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.5) 0%, transparent 24%),
+    radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.35) 100%);
+}
+
+[data-at] {
+  opacity: 0;
+  visibility: hidden;
+  will-change: opacity, transform;
+}
+
+.h1,
+.h2 {
+  text-shadow: 0 1px 18px rgba(0, 0, 0, 0.6);
+  text-transform: uppercase;
+  font-weight: 450;
+  letter-spacing: 0.02em;
+  text-wrap: balance;
+}
+.h1 {
+  font-size: clamp(24px, 3vw, 52px);
+  line-height: 1.12;
+}
+.h2 {
+  font-size: clamp(18px, 2vw, 32px);
+  line-height: 1.2;
+}
+.accent {
+  color: var(--primary);
+}
+.body {
+  color: #b4b4bb;
+  max-width: 36ch;
+  font-size: clamp(13px, 1vw, 16px);
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.9);
+}
+.label {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Copy anchors, armory-style: headline bottom-left, supporting line to its right. */
+.lower {
+  position: absolute;
+  left: var(--gutter);
+  right: var(--gutter);
+  bottom: clamp(32px, 9vh, 96px);
+  display: flex;
+  align-items: flex-end;
+  gap: clamp(24px, 5vw, 96px);
+  z-index: 2;
+}
+.center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  gap: 16px;
+  padding: 0 var(--gutter);
+  z-index: 2;
+}
+.top {
+  position: absolute;
+  left: var(--gutter);
+  right: var(--gutter);
+  top: clamp(72px, 14vh, 140px);
+  z-index: 2;
+}
+@media (max-width: 720px) {
+  .lower {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+}
+
+/* Chrome: armory's navbar. A dark inset bar, hidden while scrolling down. */
+.nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  padding: 14px clamp(12px, 4vw, 64px) 0;
+  transition: transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.nav.nav-hidden {
+  transform: translateY(-110%);
+}
+html.menu-open .nav.nav-hidden {
+  transform: none;
+}
+.nav-bar {
+  position: relative;
+  z-index: 2;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 0 6px 0 18px;
+  background: rgba(14, 14, 16, 0.82);
+  backdrop-filter: blur(10px);
+  border: 1px solid #1c1c1f;
+}
+.nav-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: var(--fg);
+  font-weight: 600;
+  letter-spacing: 0.28em;
+  font-size: 13px;
+}
+.nav-links {
+  margin-left: auto;
+  display: flex;
+  gap: 28px;
+}
+.nav-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--fg);
+}
+.nav-links a::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  background: var(--primary);
+}
+.nav-links a:hover {
+  color: var(--primary);
+}
+.nav-menu {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-content: center;
+  gap: 5px;
+  background: #1c1c1f;
+  border: 1px solid #2a2a2e;
+  cursor: pointer;
+}
+.nav-menu i {
+  display: block;
+  width: 18px;
+  height: 1.5px;
+  background: var(--fg);
+  transition:
+    transform 0.3s,
+    opacity 0.3s;
+}
+.nav-menu.is-open i:nth-child(1) {
+  transform: translateY(6.5px) rotate(45deg);
+}
+.nav-menu.is-open i:nth-child(2) {
+  opacity: 0;
+}
+.nav-menu.is-open i:nth-child(3) {
+  transform: translateY(-6.5px) rotate(-45deg);
+}
+.nav-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  padding: 120px clamp(24px, 8vw, 140px) 48px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(12px);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.35s,
+    visibility 0.35s;
+}
+.nav-panel.is-open {
+  opacity: 1;
+  visibility: visible;
+}
+.nav-panel ul {
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+.nav-panel li {
+  overflow: hidden;
+}
+.nav-panel li a {
+  display: inline-block;
+  font-size: clamp(28px, 5vw, 64px);
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--fg);
+  letter-spacing: 0.02em;
+  transform: translateY(100%);
+  transition:
+    transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1),
+    color 0.2s;
+}
+.nav-panel.is-open li a {
+  transform: none;
+}
+.nav-panel li a:hover {
+  color: var(--primary);
+}
+@media (max-width: 640px) {
+  .nav-links {
+    display: none;
+  }
+  .nav-menu {
+    margin-left: auto;
+  }
+}
+
+.rail {
+  position: fixed;
+  right: clamp(12px, 2vw, 28px);
+  top: 50%;
+  translate: 0 -50%;
+  height: 22vh;
+  width: 10px;
+  z-index: 10;
+  border-top: 1px solid var(--structure-hi);
+  border-bottom: 1px solid var(--structure-hi);
+}
+.rail::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid var(--structure);
+}
+.rail i {
+  position: absolute;
+  left: 0;
+  width: 10px;
+  height: 2px;
+  background: var(--primary);
+  top: calc(var(--page, 0) * 100%);
+}
+
+/* Frame-locked overlays share the footage's coordinate space: a 1600x900 viewBox
+   with slice matches the canvas cover fit exactly, at any window aspect. */
+.frame-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  overflow: visible;
+}
+.frame-svg text {
+  font-family: var(--font);
+  font-size: 12px;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.8);
+  stroke-width: 3px;
+  letter-spacing: 0.12em;
+  fill: var(--fg);
+  text-transform: uppercase;
+}
+
+.preloader {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--bg);
+  display: grid;
+  place-content: center;
+  gap: 18px;
+  text-align: center;
+  transition:
+    opacity 0.9s ease,
+    visibility 0.9s;
+}
+.preloader.done {
+  opacity: 0;
+  visibility: hidden;
+}
+.preloader .bar {
+  width: 180px;
+  height: 1px;
+  background: var(--border);
+  position: relative;
+}
+.preloader .bar i {
+  position: absolute;
+  inset: 0;
+  background: var(--primary);
+  transform-origin: left;
+  transform: scaleX(var(--l, 0));
+}
+
+/* Twin hairline: dashed is the twin, everywhere on this site and in the GCS. Light
+   rather than the GCS grey, which vanishes over lit metal. */
+.twin path {
+  stroke-dasharray: 5 4;
+  opacity: 0.9;
+}
+.twin {
+  clip-path: inset(0 calc((1 - min(1, var(--p, 0) * 1.8)) * 100%) 0 0);
+}
+
+/* Crash: limit-status strip, then the page itself goes black before impact. */
+.gauges {
+  position: absolute;
+  left: var(--gutter);
+  right: var(--gutter);
+  bottom: clamp(24px, 6vh, 64px);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  z-index: 2;
+}
+.gauge {
+  background: rgba(0, 0, 0, 0.72);
+  padding: 10px 12px;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.gauge-state {
+  font-size: 13px;
+  color: var(--fg);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.blackout {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  z-index: 1;
+  opacity: clamp(0, calc((var(--p, 0) - 0.86) * 14), 1);
+}
+
+/* Rewind: a timeline running right to left, and scanlines so it reads as playback. */
+.rewind::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.035) 0 1px,
+    transparent 1px 3px
+  );
+}
+.scrubline {
+  margin-top: 12px;
+  height: 1px;
+  width: min(420px, 60vw);
+  background: var(--structure);
+  position: relative;
+}
+.scrubline::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -1px;
+  height: 3px;
+  background: var(--primary);
+  width: calc(max(0, 1 - var(--p, 0) / 0.8) * 100%);
+}
+
+.legend {
+  position: absolute;
+  right: var(--gutter);
+  top: clamp(72px, 12vh, 120px);
+  display: flex;
+  gap: 20px;
+  z-index: 2;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.legend i {
+  display: inline-block;
+  width: 28px;
+  border-top: 2px solid var(--fg);
+}
+.legend i.dashed {
+  border-top: 1.5px dashed var(--fg);
+}
+
+.black {
+  background: #000;
+}
+.results {
+  display: grid;
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  margin-top: 12px;
+  min-width: min(560px, 90vw);
+}
+.result {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 24px;
+  background: #000;
+  padding: 18px 22px;
+  text-align: left;
+}
+
+.altimeter {
+  position: absolute;
+  right: calc(var(--gutter) + 24px);
+  top: 50%;
+  translate: 0 -50%;
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+  z-index: 2;
+}
+.alt-scale {
+  position: relative;
+  width: 2px;
+  height: 30vh;
+  background: var(--structure);
+  margin-top: 8px;
+}
+.alt-scale b {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--fg);
+}
+.alt-scale i {
+  position: absolute;
+  right: -6px;
+  width: 14px;
+  border-top: 1px solid var(--primary);
+}
+.alt-scale i::after {
+  content: "20,000 ft · TCDS ceiling";
+  position: absolute;
+  right: 22px;
+  top: -8px;
+  white-space: nowrap;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  font-style: normal;
+}
+
+/* The footer is a strip, not a page: at the very end the verdict and its
+   "Open the dashboard" stay on screen above it, because the dashboard is where
+   the reader should go next. */
+.footer {
+  position: relative;
+  z-index: 3;
+  background: #000;
+  border-top: 1px solid var(--border);
+  padding: 28px var(--gutter) 24px;
+  display: grid;
+  gap: 18px;
+}
+.footer-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.footer-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.footer-brand b {
+  font-weight: 600;
+  letter-spacing: 0.28em;
+  font-size: 13px;
+}
+.footer-brand span {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.footer-links {
+  display: flex;
+  gap: 28px;
+}
+.footer-links a {
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--fg);
+}
+.footer-links a:first-child {
+  color: var(--primary);
+}
+.footer-links a:hover {
+  color: var(--primary);
+}
+.disclosure {
+  color: var(--dim);
+}
+
+/* v2: scenes that dissolve in overlap the previous one by a viewport, so their
+   stage is already pinned when the fade starts. scroll.ts drives the opacity. */
+/* The handover fade sets opacity here; its own stacking layer keeps the copy's
+   z-order the same mid-fade as at rest. */
+.stage-inner {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+}
+
+.w {
+  display: inline-block;
+  will-change: opacity;
+}
+
+.dither {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+}
+.h1.xl {
+  font-size: clamp(34px, 5.4vw, 96px);
+  line-height: 1.02;
+}
+.wordmark-xl {
+  font-size: clamp(44px, 9vw, 168px);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-shadow: 0 2px 40px rgba(0, 0, 0, 0.55);
+}
+
+/* Reveal: the twin wipes on after the dissolve back to the bay. */
+.reveal .twin {
+  clip-path: inset(0 calc((1 - clamp(0, (var(--p, 0) - 0.12) * 2.4, 1)) * 100%) 0 0);
+}
+.parts line {
+  stroke: var(--fg);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.8;
+}
+.parts circle {
+  fill: var(--primary);
+}
+.parts rect {
+  fill: rgba(10, 10, 11, 0.86);
+  stroke: var(--structure-hi);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.parts text {
+  font-size: 13px;
+}
+
+/* Cards: armory's pinned frame, off-white panels on the black stage. */
+.cards-stage {
+  background: #000;
+}
+.cards {
+  position: absolute;
+  inset: clamp(64px, 11vh, 110px) clamp(16px, 5vw, 96px) clamp(24px, 6vh, 64px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: 10px;
+}
+.card-left,
+.card-right {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+/* Two surfaces, as armory does it: the copy on white, the instrument on grey with
+   a crosshair, so the eye reads them as paper and screen. */
+.card-left {
+  background: #ffffff;
+  color: #0a0a0b;
+}
+.card-right {
+  background:
+    linear-gradient(#c9c9ce, #c9c9ce) center / 1px 100% no-repeat,
+    linear-gradient(#c9c9ce, #c9c9ce) center / 100% 1px no-repeat,
+    #dcdcdf;
+}
+.card-copy {
+  position: absolute;
+  inset: clamp(20px, 3.4vh, 36px) clamp(20px, 2.4vw, 40px) 76px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 0;
+}
+.card-head {
+  display: grid;
+  gap: 14px;
+}
+.card-kicker {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #6e6e76;
+}
+.card-title {
+  font-size: clamp(22px, 2.5vw, 44px);
+  line-height: 1.12;
+  font-weight: 450;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  text-shadow: none;
+  color: #0a0a0b;
+}
+.card-foot ul {
+  list-style: none;
+  display: grid;
+  gap: 12px;
+}
+.card-foot li {
+  position: relative;
+  padding-left: 18px;
+  font-size: clamp(12px, 0.9vw, 14px);
+  line-height: 1.45;
+  color: #2a2a2e;
+  max-width: 56ch;
+}
+.card-foot li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.5em;
+  width: 7px;
+  height: 7px;
+  background: var(--primary);
+}
+.card-note {
+  margin-top: 14px;
+  font-size: 11px;
+  color: #6e6e76;
+  letter-spacing: 0.02em;
+}
+.card-progress {
+  position: absolute;
+  left: clamp(20px, 2.4vw, 40px);
+  right: clamp(20px, 2.4vw, 40px);
+  bottom: 30px;
+  height: 12px;
+  border-left: 1px solid #0a0a0b;
+  border-right: 1px solid #0a0a0b;
+}
+.card-progress::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 5px;
+  border-top: 1px solid #c8c8cc;
+}
+.card-progress i {
+  position: absolute;
+  left: 0;
+  top: 4px;
+  height: 3px;
+  background: var(--primary);
+  width: calc((var(--k, 0) + var(--lp, 0)) / 5 * 100%);
+}
+.card-visual {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+.footage {
+  position: absolute;
+  inset: 0;
+}
+.footage video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.chip {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  translate: -50% 0;
+  background: rgba(10, 10, 11, 0.8);
+  color: var(--fg);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 10px 18px;
+  border-top: 2px solid var(--primary);
+  white-space: nowrap;
+}
+
+/* Charts on the light panel: ink is measured, grey dashed is the twin, orange is
+   the alarm, red is failure. Same grammar as the GCS, inverted for paper. */
+.chart {
+  width: 100%;
+  height: 100%;
+  padding: 12px 8px;
+  overflow: visible;
+}
+.chart text {
+  font-family: var(--font);
+  font-size: 12px;
+  fill: #3a3a40;
+  letter-spacing: 0.04em;
+}
+.chart .ax {
+  fill: #6e6e76;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+}
+.chart .meas {
+  fill: none;
+  stroke: #0a0a0b;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.chart .twin {
+  fill: none;
+  stroke: #6e6e76;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  vector-effect: non-scaling-stroke;
+}
+.chart .limit {
+  stroke: var(--primary);
+  stroke-dasharray: 3 3;
+}
+.chart .limit.crit {
+  stroke: var(--crit);
+}
+.chart .limit-t {
+  fill: var(--primary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.chart .limit-t.crit {
+  fill: var(--crit);
+}
+.chart .nominal {
+  stroke: #a0a0a8;
+  stroke-dasharray: 1 3;
+}
+.chart .m-dim line {
+  stroke: #8e8e96;
+  stroke-dasharray: 2 3;
+}
+.chart .m-dim text {
+  fill: #6e6e76;
+  font-size: 11px;
+}
+.chart .m-hot line {
+  stroke: var(--primary);
+  stroke-width: 1.5;
+}
+.chart .m-hot text {
+  fill: var(--primary);
+  font-weight: 600;
+  font-size: 12px;
+}
+.chart .m-ink line {
+  stroke: #0a0a0b;
+  stroke-dasharray: 4 3;
+}
+.chart .m-ink text {
+  fill: #0a0a0b;
+  font-size: 11px;
+}
+.chart .never {
+  fill: #0a0a0b;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.chart .row {
+  font-size: 12px;
+  fill: #2a2a2e;
+  letter-spacing: 0.06em;
+}
+.chart .val,
+.chart .clock {
+  fill: #0a0a0b;
+  font-variant-numeric: tabular-nums;
+}
+.chart .clock {
+  font-size: 14px;
+  font-weight: 600;
+}
+.chart .track {
+  fill: #d4d4d8;
+}
+.chart .bar {
+  fill: #3a3a40;
+}
+.chart .bar.hot {
+  fill: var(--primary);
+}
+.chart .band {
+  fill: #0a0a0b;
+  opacity: 0.1;
+}
+.chart .fan {
+  fill: var(--primary);
+  opacity: 0.16;
+}
+.chart .proj {
+  stroke: var(--primary);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+.chart .big {
+  font-size: 26px;
+  font-weight: 600;
+  fill: var(--primary);
+}
+
+.cta {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 12px;
+}
+.btn {
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-decoration: none;
+  padding: 12px 20px;
+  background: #18181b;
+  color: var(--fg);
+  border: 1px solid var(--structure);
+}
+.btn.primary {
+  background: var(--primary);
+  color: #000;
+  border-color: var(--primary);
+}
+.btn:hover {
+  filter: brightness(1.15);
+}
+
+@media (max-width: 900px) {
+  .cards {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1.1fr 1fr;
+  }
+}
+
+/* A spec strip reads as data, not prose: tabular, spaced, in the label voice. */
+.body.spec {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: clamp(12px, 0.9vw, 14px);
+}
+
+/* ?record: nothing on screen that a viewer did not come for. */
+html.recording,
+html.recording * {
+  cursor: none !important;
+}
+html.recording .rail {
+  display: none;
+}
