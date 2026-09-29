@@ -1,6 +1,6 @@
 import type { FrameMap } from "../film/scroll";
 import { at, linear } from "../film/scroll";
-import { ChannelBoxes } from "./EngineOverlay";
+import { ChannelBoxes, ENGINE_FX } from "./EngineOverlay";
 import { Scene } from "./Scene";
 
 // Act I, the problem. One continuous camera: the plateau, the aircraft, into the
@@ -42,14 +42,14 @@ const CROSS = 0.88; // start of the dissolve into the injector macro
 const CYL3 = { x: 605, y: 520 };
 
 const engine: FrameMap = (p) => {
-  if (p < IN) return { a: at("S1", 1), b: at("S2", (p / IN) * LEAD), mix: p / IN };
+  if (p < IN) return { a: at("S1", 1), b: at("S2", (p / IN) * LEAD), mix: p / IN, fxB: ENGINE_FX };
   const u = LEAD + ((p - IN) / (DIVE - IN)) * (1 - LEAD);
-  if (p < DIVE) return { a: at("S2", u) };
+  if (p < DIVE) return { a: at("S2", u), fx: ENGINE_FX };
   const d = (p - DIVE) / (1 - DIVE);
   // Ease-in on the push, so it starts as a drift and ends as a dive.
   const zoom = { ...CYL3, s: 1 + 2.2 * d * d };
-  if (p < CROSS) return { a: at("S2", 1), zoom };
-  return { a: at("S2", 1), zoom, b: at("S3", 0), mix: (p - CROSS) / (1 - CROSS) };
+  if (p < CROSS) return { a: at("S2", 1), zoom, fx: ENGINE_FX };
+  return { a: at("S2", 1), zoom, fx: ENGINE_FX, b: at("S3", 0), mix: (p - CROSS) / (1 - CROSS) };
 };
 
 /** Orbit into the engine bay; every instrumented part is bracketed, then the camera dives. */

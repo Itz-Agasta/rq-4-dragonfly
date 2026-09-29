@@ -1,3 +1,4 @@
+import { coverLeft } from "./crop";
 import { nearest, onDecoded, type SeqId } from "./sequences";
 
 // One fixed full-viewport canvas for the whole film. Scenes do not own canvases:
@@ -12,7 +13,16 @@ export type Shot = { id: SeqId; f: number };
  * `mix`; `zoom` scales about a point given in the footage's 1600x900 space, the same
  * space the frame-locked SVG overlays use.
  */
-export type Frame = { a: Shot; b?: Shot; mix?: number; zoom?: { x: number; y: number; s: number } };
+export type Frame = {
+  a: Shot;
+  b?: Shot;
+  mix?: number;
+  zoom?: { x: number; y: number; s: number };
+  /** Focal x in footage space for narrow screens; see crop.ts. */
+  fx?: number;
+  /** Focal x of the incoming shot `b`: it must land at the crop it keeps next scene. */
+  fxB?: number;
+};
 
 let canvas: HTMLCanvasElement;
 let ctx: CanvasRenderingContext2D;
@@ -96,18 +106,18 @@ function draw() {
     // Map the zoom point from footage space to canvas space with the same cover
     // arithmetic paint() uses, then scale about it.
     const s = Math.max(cw / 1600, ch / 900);
-    const px = (cw - 1600 * s) / 2 + t.zoom.x * s;
+    const px = coverLeft(cw, ch, t.fx) + t.zoom.x * s;
     const py = (ch - 900 * s) / 2 + t.zoom.y * s;
     ctx.setTransform(t.zoom.s, 0, 0, t.zoom.s, px * (1 - t.zoom.s), py * (1 - t.zoom.s));
   }
-  paint(easeA!, 1);
+  paint(easeA!, 1, t.fx);
   // The incoming shot is never zoomed: it lands at 1x so the next scene, which
   // starts it unzoomed, continues without a jump.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  if (easeB && t.mix) paint(easeB, t.mix);
+  if (easeB && t.mix) paint(easeB, t.mix, t.fxB);
 }
 
-function paint(shot: Shot, alpha: number) {
+function paint(shot: Shot, alpha: number, fx?: number) {
   const img = nearest(shot.id, Math.round(shot.f));
   // Not loaded yet: keep what is on screen rather than flash black. onDecoded
   // marks the canvas dirty when something lands.
@@ -120,6 +130,6 @@ function paint(shot: Shot, alpha: number) {
   const w = iw * s;
   const h = ih * s;
   ctx.globalAlpha = alpha;
-  ctx.drawImage(img, (cw - w) / 2, (ch - h) / 2, w, h);
+  ctx.drawImage(img, coverLeft(cw, ch, fx), (ch - h) / 2, w, h);
   ctx.globalAlpha = 1;
 }

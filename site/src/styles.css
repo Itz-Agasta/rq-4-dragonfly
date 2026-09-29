@@ -1035,3 +1035,35 @@ html.recording * {
 html.recording .rail {
   display: none;
 }
+
+/* Phones. The engine chips and the channel caption are sized for a 16:9 frame and
+   cannot fit a portrait crop; the brackets and the twin carry the meaning alone. */
+@media (max-aspect-ratio: 1/1) {
+  .parts,
+  .frame-svg .caption {
+    display: none;
+  }
+}
+@media (max-width: 720px) {
+  .gauges {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    bottom: 16px;
+  }
+  .gauge {
+    padding: 6px 7px;
+  }
+  .gauge .label {
+    font-size: 9px;
+  }
+  .gauge-state {
+    font-size: 9px;
+    letter-spacing: 0.02em;
+  }
+  .cta {
+    flex-wrap: wrap;
+  }
+  .btn {
+    white-space: nowrap;
+    padding: 12px 16px;
+  }
+}

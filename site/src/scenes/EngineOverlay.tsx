@@ -1,11 +1,20 @@
 import { useLayoutEffect, useRef } from "react";
 
+import { useFootageViewBox } from "../film/crop";
+
 // Overlays drawn in the footage's own pixel space. Coordinates were measured on the
 // last frame of site/gen/masters/S2.mp4 at 1600x900; re-measure if S2 is re-rendered.
 // preserveAspectRatio "xMidYMid slice" is the SVG spelling of the canvas cover fit,
 // so these stay registered on the engine at any window aspect.
 
 type Box = { x: number; y: number; w: number; h: number; label: string; hot?: boolean };
+
+/**
+ * Focal x of the engine bay in footage space. On narrow screens the crop centres
+ * here instead of on the frame, so the bay stays in view; scenes pass the same value
+ * to the canvas (Frame.fx) or the overlays drift off the metal.
+ */
+export const ENGINE_FX = 665;
 
 // Bore rims measured at 2x on a 10 px grid: (cx, cy, rx, ry, depth to the block).
 // The bores step up toward the prop because the camera looks slightly down the bay.
@@ -49,13 +58,9 @@ function Corners({ x, y, w, h, hot }: Box) {
  * scene window [from, to]. They clear before the camera dives into cylinder 3.
  */
 export function ChannelBoxes({ from, to }: { from: number; to: number }) {
+  const vb = useFootageViewBox(ENGINE_FX);
   return (
-    <svg
-      className="frame-svg"
-      viewBox="0 0 1600 900"
-      preserveAspectRatio="xMidYMid slice"
-      aria-hidden
-    >
+    <svg className="frame-svg" viewBox={vb} preserveAspectRatio="xMidYMid slice" aria-hidden>
       {BOXES.map((b, i) => (
         <g key={b.label} data-at={`${from + i * 0.025},${to}`}>
           <rect
@@ -74,7 +79,13 @@ export function ChannelBoxes({ from, to }: { from: number; to: number }) {
           </text>
         </g>
       ))}
-      <text x={418} y={612} data-at={`${from + 0.14},${to}`} style={{ fill: "var(--muted)" }}>
+      <text
+        className="caption"
+        x={418}
+        y={612}
+        data-at={`${from + 0.14},${to}`}
+        style={{ fill: "var(--muted)" }}
+      >
         CHT · EGT · lambda every cylinder · oil P · oil T · fuel flow · crank rpm
       </text>
     </svg>
@@ -101,13 +112,9 @@ const TWIN = [
  * wipes on left to right with the section's `--p` (see .twin in styles.css).
  */
 export function TwinTrace() {
+  const vb = useFootageViewBox(ENGINE_FX);
   return (
-    <svg
-      className="frame-svg twin"
-      viewBox="0 0 1600 900"
-      preserveAspectRatio="xMidYMid slice"
-      aria-hidden
-    >
+    <svg className="frame-svg twin" viewBox={vb} preserveAspectRatio="xMidYMid slice" aria-hidden>
       {TWIN.map((d, i) => (
         <path
           key={i}
@@ -135,6 +142,7 @@ const PARTS = [
 
 /** Names what DRAGONFLY adds to the engine, one label at a time inside [from, 1]. */
 export function PartLabels({ from }: { from: number }) {
+  const vb = useFootageViewBox(ENGINE_FX);
   const svg = useRef<SVGSVGElement>(null);
   // Chips are sized from the rendered text, not a per-character guess: letter
   // spacing and the late-loading web font both change the width.
@@ -152,7 +160,7 @@ export function PartLabels({ from }: { from: number }) {
     <svg
       ref={svg}
       className="frame-svg parts"
-      viewBox="0 0 1600 900"
+      viewBox={vb}
       preserveAspectRatio="xMidYMid slice"
       aria-hidden
     >

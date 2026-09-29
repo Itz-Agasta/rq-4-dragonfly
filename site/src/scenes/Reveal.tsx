@@ -3,13 +3,15 @@ import { useRef } from "react";
 import type { FrameMap } from "../film/scroll";
 import { at } from "../film/scroll";
 import { DitherBg } from "./DitherBg";
-import { PartLabels, TwinTrace } from "./EngineOverlay";
+import { ENGINE_FX, PartLabels, TwinTrace } from "./EngineOverlay";
 import { Scene } from "./Scene";
 
 const BACK = 0.12; // dissolve from the injector macro back out to the open bay
 
 const reveal: FrameMap = (p) =>
-  p < BACK ? { a: at("S3", 1), b: at("S2", 1), mix: p / BACK } : { a: at("S2", 1) };
+  p < BACK
+    ? { a: at("S3", 1), b: at("S2", 1), mix: p / BACK, fxB: ENGINE_FX }
+    : { a: at("S2", 1), fx: ENGINE_FX };
 
 /** The product, named only now: the twin traces on over the real engine. */
 export function Reveal() {
