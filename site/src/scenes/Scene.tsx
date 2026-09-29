@@ -41,7 +41,7 @@ export function Scene({
       ref={ref}
       id={id}
       className="scene"
-      style={{ height: `${vh}vh` }}
+      style={{ height: `calc(${vh}vh * var(--scroll-scale, 1))` }}
       data-opaque={opaque ? "1" : undefined}
     >
       <div className={`stage ${stage}`}>

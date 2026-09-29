@@ -1067,3 +1067,12 @@ html.recording .rail {
     padding: 12px 16px;
   }
 }
+
+/* A thumb swipe covers far less than a wheel or trackpad flick, so the same story
+   at desktop lengths took too many swipes on a phone. Touch-first screens get 0.6x
+   the scroll per scene; the frames per scene are unchanged, so it plays faster. */
+@media (pointer: coarse), (max-width: 720px) {
+  :root {
+    --scroll-scale: 0.6;
+  }
+}
