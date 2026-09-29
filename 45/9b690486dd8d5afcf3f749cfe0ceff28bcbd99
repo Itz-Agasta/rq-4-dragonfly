@@ -1,0 +1,52 @@
+site/tsconfig.json
+  s_cb70e7da792df7::t_1ed4acca6dbba3 1-2,4
+  s_cb70e7da792df7::t_cd354abc4cfb24 3
+site/tsconfig.node.json
+  s_cb70e7da792df7::t_1ed4acca6dbba3 1-23
+site/tsconfig.app.json
+  s_cb70e7da792df7::t_1ed4acca6dbba3 1-26
+site/package.json
+  s_cb70e7da792df7::t_cd354abc4cfb24 4,28
+  s_cb70e7da792df7::t_1ed4acca6dbba3 1-3,5-27
+site/public/favicon.svg
+  s_cb70e7da792df7::t_8a7f82d02ff858 1
+site/index.html
+  s_cb70e7da792df7::t_cec6fa256f1867 13
+  s_cb70e7da792df7::t_1ed4acca6dbba3 1-4,6,14-19
+  s_cb70e7da792df7::t_70763d94f81b00 12
+  s_cb70e7da792df7::t_cd354abc4cfb24 5,8-11
+  s_cb70e7da792df7::t_842198f2cf727d 7
+site/src/main.tsx
+  s_cb70e7da792df7::t_cd354abc4cfb24 3,5
+  s_cb70e7da792df7::t_1ed4acca6dbba3 7,9-11
+  s_cb70e7da792df7::t_70763d94f81b00 1-2,4,6,8,12
+site/vite.config.ts
+  s_cb70e7da792df7::t_1ed4acca6dbba3 3-6
+  s_cb70e7da792df7::t_cd354abc4cfb24 1-2,7
+pnpm-workspace.yaml
+  s_cb70e7da792df7::t_1ed4acca6dbba3 3
+site/.oxlintrc.json
+  s_cb70e7da792df7::t_1ed4acca6dbba3 1-8
+site/.gitignore
+  s_cb70e7da792df7::t_944272a37d8077 2-4
+  s_cb70e7da792df7::t_2fd77d1600d5f1 5
+  s_cb70e7da792df7::t_88f8a7b65c6c8a 1
+pnpm-lock.yaml
+  s_cb70e7da792df7::t_11d204882ccdca 18-57,198-200,329-334,341-346,353-358,365-370,377-382,389-394,401-406,414-420,428-434,442-448,456-462,470-476,484-490,498-504,512-518,525-530,537-542,549-554,561-566,1257-1262,1269-1274,1281-1286,1293-1298,1305-1310,1317-1322,1329-1335,1343-1349,1357-1363,1371-1377,1385-1391,1399-1405,1413-1418,1425-1430,1437-1442,1572-1576,1735-1737,1750-1763,1951-1963,1975-1978,2041-2045,2148-2190,2253-2254,2315-2317,2321-2323,2327-2329,2333-2335,2339-2341,2345-2347,2351-2353,2357-2359,2363-2365,2369-2371,2375-2377,2381-2383,2387-2389,2393-2395,2399-2401,2405-2407,2411-2413,2417-2419,2423-2425,3173-3175,3179-3181,3185-3187,3191-3193,3197-3199,3203-3205,3209-3211,3215-3217,3221-3223,3227-3229,3233-3235,3239-3241,3245-3247,3251-3253,3257-3259,3357-3360,3401-3405,3478-3479,3488-3491,3646-3667,3678-3683,3788-3808,3880-3891
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "459b690486dd8d5afcf3f749cfe0ceff28bcbd99",
+  "prompts": {},
+  "sessions": {
+    "s_cb70e7da792df7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "837e4a02-4c3f-453a-a4c4-1ddf05c52b33",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Itz-Agasta <rupamgolui69@gmail.com>"
+    }
+  }
+}
