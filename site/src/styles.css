@@ -1076,3 +1076,27 @@ html.recording .rail {
     --scroll-scale: 0.6;
   }
 }
+
+/* Ground station card: real captures of the GCS, crossfading with the card's scroll.
+   The dark screen on the grey instrument panel reads as a display on a desk. */
+.screens {
+  position: absolute;
+  inset: clamp(14px, 3vh, 36px) clamp(12px, 2vw, 32px);
+  display: grid;
+  place-items: center;
+}
+.screens img {
+  grid-area: 1 / 1;
+  width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  opacity: 0;
+  transition: opacity 0.45s ease;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+}
+.screens img.is-on {
+  opacity: 1;
+}
+.screens .chip {
+  top: 0;
+}

@@ -1,4 +1,4 @@
-import { useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import coking from "../data/coking.json";
 import rul from "../data/rul.json";
@@ -103,10 +103,41 @@ const CARDS: Card[] = [
       "Orange: look. Red: act. Healthy stays quiet",
       "Rust from the CAN bus to the twin",
     ],
-    // MOCK: real GCS screenshots composited onto the monitor wall replace the empty screens.
-    visual: () => <Footage src={`${ASSETS}/media/S10.mp4`} tag="ground control station" />,
+    visual: (bind) => <Screens bind={bind} />,
   },
 ];
+
+// Captured from the running stack (dragonfly-sim with injector 3 coking, core,
+// the GCS) at T+7 min, not drawn: the one card about the product shows the product.
+const SCREENS = [
+  { src: "gcs-1.webp", tag: "OPS · only the twin fired" },
+  { src: "gcs-2.webp", tag: "ANALYSIS · residual matrix" },
+  { src: "gcs-3.webp", tag: "TWIN · measured vs physics" },
+];
+
+/** The ground station's own screens, stepped through with the card's scroll. */
+function Screens({ bind }: { bind: Binder }) {
+  const [k, setK] = useState(0);
+  // Done by 80%: the card's last stretch is the dissolve into the crash.
+  const step = (lp: number) =>
+    setK(Math.min(SCREENS.length - 1, Math.floor((lp / 0.8) * SCREENS.length)));
+  useEffect(() => bind(step), [bind]);
+  return (
+    <div className="screens">
+      {SCREENS.map((s, i) => (
+        <img
+          key={s.src}
+          src={`${ASSETS}/media/${s.src}`}
+          alt={`DRAGONFLY ground station, ${s.tag}`}
+          className={i === k ? "is-on" : ""}
+          loading="lazy"
+          decoding="async"
+        />
+      ))}
+      <span className="chip">{SCREENS[k].tag}</span>
+    </div>
+  );
+}
 
 function Footage({ src, tag }: { src: string; tag: string }) {
   return (
