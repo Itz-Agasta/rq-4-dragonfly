@@ -1,0 +1,27 @@
+site/src/cards/Cards.tsx
+  s_ef50e5c3a9513a::t_6c3fab925d3346 19-20,108-109,122-124,126-130,134-139,141,147,150-151,157,162,177-178,183,192-194,196,200
+  s_ef50e5c3a9513a::t_a013032be0c434 140
+  s_ef50e5c3a9513a::t_4eef075a01eb82 131-133
+  s_ef50e5c3a9513a::t_bfc71cd36b34c0 142-146,179-182,204,229
+site/src/styles.css
+  s_ef50e5c3a9513a::t_4ec3f69a4819fa 831,1080,1088-1089,1092-1094,1096-1097,1109
+  s_ef50e5c3a9513a::t_4eef075a01eb82 1081,1095
+  s_ef50e5c3a9513a::t_a013032be0c434 1100
+  s_ef50e5c3a9513a::t_4e8ddbadac318f 1090-1091
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ec547ce0ab0b47ccb346776169d31947baaa2996",
+  "prompts": {},
+  "sessions": {
+    "s_ef50e5c3a9513a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a878055-7740-4881-98ec-26616ad43568",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Itz-Agasta <rupamgolui69@gmail.com>"
+    }
+  }
+}
