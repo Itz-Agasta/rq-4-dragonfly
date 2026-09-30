@@ -16,6 +16,8 @@ type Card = {
   title: ReactNode;
   bullets: string[];
   note?: string;
+  /** Scroll windows this card holds, default 1. */
+  span?: number;
   visual: (bind: Binder) => ReactNode;
 };
 type Binder = (f: (lp: number) => void) => void;
@@ -103,6 +105,8 @@ const CARDS: Card[] = [
       "Orange: look. Red: act. Healthy stays quiet",
       "Rust from the CAN bus to the twin",
     ],
+    // Two windows: the walk up to the wall, then the screens themselves.
+    span: 2,
     visual: (bind) => <Screens bind={bind} />,
   },
 ];
@@ -115,26 +119,47 @@ const SCREENS = [
   { src: "gcs-3.webp", tag: "TWIN · measured vs physics" },
 ];
 
-/** The ground station's own screens, stepped through with the card's scroll. */
+const clamp = (x: number) => Math.max(0, Math.min(1, x));
+
+/** A push-in on the ops room, then the ground station's own screens, all on the card's scroll. */
 function Screens({ bind }: { bind: Binder }) {
-  const [k, setK] = useState(0);
-  // Done by 80%: the card's last stretch is the dissolve into the crash.
-  const step = (lp: number) =>
-    setK(Math.min(SCREENS.length - 1, Math.floor((lp / 0.8) * SCREENS.length)));
+  const [k, setK] = useState(-1);
+  const root = useRef<HTMLDivElement>(null);
+  const video = useRef<HTMLVideoElement>(null);
+  // S10-push.mp4 is all-intra (every frame a keyframe) so seeking on scroll is
+  // instant; the one-keyframe web copy of S10 stalls on every seek.
+  // Push-in to 40%, the capture lights up on the wall 34 to 44%, screens stepped
+  // through by 90%. The room stays behind them: faded out, it washes to grey on
+  // the light panel and the screens lose their place.
+  const step = (lp: number) => {
+    const v = video.current;
+    if (v && v.duration) {
+      const t = clamp(lp / 0.4) * (v.duration - 0.05);
+      if (Math.abs(v.currentTime - t) > 0.02) v.currentTime = t;
+    }
+    const fade = clamp((lp - 0.34) / 0.1);
+    root.current?.style.setProperty("--in", fade.toFixed(3));
+    setK(
+      fade < 0.5
+        ? -1
+        : Math.min(SCREENS.length - 1, Math.floor(((lp - 0.4) / 0.5) * SCREENS.length)),
+    );
+  };
   useEffect(() => bind(step), [bind]);
   return (
-    <div className="screens">
+    <div className="screens" ref={root}>
+      <video ref={video} src={`${ASSETS}/media/S10-push.mp4`} muted playsInline preload="auto" />
       {SCREENS.map((s, i) => (
         <img
           key={s.src}
           src={`${ASSETS}/media/${s.src}`}
           alt={`DRAGONFLY ground station, ${s.tag}`}
-          className={i === k ? "is-on" : ""}
+          className={i === Math.max(0, k) ? "is-on" : ""}
           loading="lazy"
           decoding="async"
         />
       ))}
-      <span className="chip">{SCREENS[k].tag}</span>
+      <span className="chip">{k < 0 ? "ground control station" : SCREENS[k].tag}</span>
     </div>
   );
 }
@@ -149,6 +174,13 @@ function Footage({ src, tag }: { src: string; tag: string }) {
 }
 
 const N = CARDS.length;
+// Cumulative scroll windows: card k runs from EDGE[k] to EDGE[k + 1], as fractions of the scene.
+const WINDOWS = CARDS.reduce((w, c) => w + (c.span ?? 1), 0);
+const EDGE = CARDS.reduce<number[]>(
+  (e, c) => [...e, e[e.length - 1] + (c.span ?? 1) / WINDOWS],
+  [0],
+);
+const at = (k: number) => `${EDGE[k] + 0.005},${k === N - 1 ? 1.01 : EDGE[k + 1] - 0.005}`;
 
 /** Armory's card grammar: a pinned frame, copy left, a live panel right, one card per scroll window. */
 export function Cards() {
@@ -157,22 +189,19 @@ export function Cards() {
   // A plain array: written from child effects, read from the scroll callback.
   const binders = useMemo<((lp: number) => void)[]>(() => [], []);
   const onP = (p: number) => {
-    const k = Math.min(N - 1, Math.floor(p * N));
-    const lp = p * N - k;
+    let k = 0;
+    while (k < N - 1 && p >= EDGE[k + 1]) k++;
+    const lp = Math.min(1, (p - EDGE[k]) / (EDGE[k + 1] - EDGE[k]));
     root.current?.style.setProperty("--lp", lp.toFixed(4));
-    root.current?.style.setProperty("--k", String(k));
+    root.current?.style.setProperty("--prog", p.toFixed(4));
     binders[k]?.(lp);
   };
   return (
-    <Scene vh={N * 150} map={null} opaque stage="cards-stage" onP={onP} id="proof">
+    <Scene vh={WINDOWS * 150} map={null} opaque stage="cards-stage" onP={onP} id="proof">
       <div className="cards" ref={root}>
         <div className="card-left">
           {CARDS.map((c, k) => (
-            <div
-              key={c.key}
-              className="card-copy"
-              data-at={`${k / N + 0.005},${k === N - 1 ? 1.01 : (k + 1) / N - 0.005}`}
-            >
+            <div key={c.key} className="card-copy" data-at={at(k)}>
               <div className="card-head">
                 <span className="card-kicker">
                   {String(k + 1).padStart(2, "0")} / {String(N).padStart(2, "0")} · {c.key}
@@ -197,11 +226,7 @@ export function Cards() {
         </div>
         <div className="card-right">
           {CARDS.map((c, k) => (
-            <div
-              key={c.key}
-              className="card-visual"
-              data-at={`${k / N + 0.005},${k === N - 1 ? 1.01 : (k + 1) / N - 0.005}`}
-            >
+            <div key={c.key} className="card-visual" data-at={at(k)}>
               {c.visual((f) => void (binders[k] = f))}
             </div>
           ))}
