@@ -62,10 +62,20 @@ export function mountFilm(el: HTMLCanvasElement) {
 
 /** Requests a frame. Cheap to call every scroll tick; drawing happens once per rAF. */
 export function show(frame: Frame) {
+  // A zoom or a mix can change while both indices sit still (the dive parks on
+  // S2's last frame), and tick() only redraws when an index moves. Indices are
+  // left to chase(); a parked frame with nothing else changing costs no draw.
+  const t = target;
+  if (
+    !t ||
+    t.zoom?.s !== frame.zoom?.s ||
+    t.mix !== frame.mix ||
+    t.fx !== frame.fx ||
+    t.fxB !== frame.fxB ||
+    !t.b !== !frame.b
+  )
+    dirty = true;
   target = frame;
-  // Dirty on every call: a zoom or a mix can change while both indices sit still
-  // (the dive parks on S2's last frame), and tick() only redraws when an index moves.
-  dirty = true;
   schedule();
 }
 
