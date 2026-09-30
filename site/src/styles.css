@@ -450,7 +450,7 @@ html.menu-open .nav.nav-hidden {
   stroke-dasharray: 5 4;
   opacity: 0.9;
 }
-.twin {
+.frame-svg.twin {
   clip-path: inset(0 calc((1 - min(1, var(--p, 0) * 1.8)) * 100%) 0 0);
 }
 

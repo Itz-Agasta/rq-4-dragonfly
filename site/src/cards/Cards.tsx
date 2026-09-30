@@ -126,12 +126,14 @@ function Screens({ bind }: { bind: Binder }) {
   const [k, setK] = useState(-1);
   const root = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
+  const last = useRef(0);
   // S10-push.mp4 is all-intra (every frame a keyframe) so seeking on scroll is
   // instant; the one-keyframe web copy of S10 stalls on every seek.
   // Push-in to 40%, the capture lights up on the wall 34 to 44%, screens stepped
   // through by 90%. The room stays behind them: faded out, it washes to grey on
   // the light panel and the screens lose their place.
   const step = (lp: number) => {
+    last.current = lp;
     const v = video.current;
     if (v && v.duration) {
       const t = clamp(lp / 0.4) * (v.duration - 0.05);
@@ -148,7 +150,15 @@ function Screens({ bind }: { bind: Binder }) {
   useEffect(() => bind(step), [bind]);
   return (
     <div className="screens" ref={root}>
-      <video ref={video} src={`${ASSETS}/media/S10-push.mp4`} muted playsInline preload="auto" />
+      <video
+        ref={video}
+        src={`${ASSETS}/media/S10-push.mp4`}
+        muted
+        playsInline
+        preload="auto"
+        // A reader parked on the card before metadata lands would keep frame 0.
+        onLoadedMetadata={() => step(last.current)}
+      />
       {SCREENS.map((s, i) => (
         <img
           key={s.src}
