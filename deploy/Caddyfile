@@ -11,8 +11,24 @@
 }
 
 {$DRAGONFLY_DOMAIN} {
+	encode zstd gzip
+
+	# /ops went out on a demo slide while this name was still the ground station.
+	# It lands on the site now, whose button opens the GCS. 302, not 301: a
+	# browser caches a 301 forever, and this redirect is meant to be removable.
+	redir /ops* / 302
+
+	# Vite fingerprints everything under /assets, so a changed file is a new URL.
+	header /assets/* Cache-Control "public, max-age=31536000, immutable"
+
+	# The scroll site, rsync'd from site/dist into deploy/site.
+	root * /srv/site
+	file_server
+}
+
+{$GCS_DOMAIN} {
 	# A replay window is up to MAX_FRAMES (20,000) frames of MessagePack, which
-	# compresses well and is the largest thing this site ever serves. The
+	# compresses well and is the largest thing the core ever serves. The
 	# WebSocket feed is per-message binary and passes through untouched.
 	encode zstd gzip
 

@@ -1,10 +1,9 @@
 import coking from "../data/coking.json";
 import { linear } from "../film/scroll";
+import { OPS, REPO } from "../links";
 import { NoiseBg } from "./NoiseBg";
 import { Scene } from "./Scene";
 
-const REPO = "https://github.com/Itz-Agasta/rq-4-dragonfly";
-const OPS = "https://dragonfly.vyse.site/ops";
 const lead = (coking.alarms.cusum_s! - coking.onset_s).toFixed(1);
 
 // Limit status, not values. That no certified limit trips on this fault is true

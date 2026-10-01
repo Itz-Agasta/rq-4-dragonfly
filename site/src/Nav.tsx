@@ -1,17 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 
-const REPO = "https://github.com/Itz-Agasta/rq-4-dragonfly";
+import { OPS, REPO } from "./links";
 
 const MENU = [
-  { label: "Dashboard", href: "https://dragonfly.vyse.site/ops" },
+  { label: "Dashboard", href: OPS },
   { label: "The problem", href: "#top" },
   { label: "The product", href: "#product" },
   { label: "The proof", href: "#proof" },
   { label: "Read the model", href: `${REPO}#readme` },
   { label: "Source", href: REPO },
 ];
-
-const OPS = "https://dragonfly.vyse.site/ops";
 
 // The ground station's own mark (ui/index.html favicon), so site and GCS share one.
 function Mark() {
