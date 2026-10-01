@@ -1,0 +1,34 @@
+.gitignore
+  s_3f36dc27a8e952::t_540250a3ba17e0 44-46
+deploy/.env.example
+  s_3f36dc27a8e952::t_540250a3ba17e0 7,10-11
+  s_3f36dc27a8e952::t_829f545c40f9d3 12
+justfile
+  s_3f36dc27a8e952::t_7061d8ff1dcb87 90-95
+site/src/Nav.tsx
+  s_3f36dc27a8e952::t_a9aba23b27902f 3,6
+site/src/scenes/Stakes.tsx
+  s_3f36dc27a8e952::t_a9aba23b27902f 3
+deploy/Caddyfile
+  s_3f36dc27a8e952::t_540250a3ba17e0 14-29,31
+deploy/docker-compose.yml
+  s_3f36dc27a8e952::t_540250a3ba17e0 61,65-67
+site/src/links.ts
+  s_3f36dc27a8e952::t_a9aba23b27902f 1-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "18e3eb45fbcb21635dd0723ab56aeb578f28db1e",
+  "prompts": {},
+  "sessions": {
+    "s_3f36dc27a8e952": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3b2a53b6-3d1b-455e-abbb-91184b20efb6",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Itz-Agasta <rupamgolui69@gmail.com>"
+    }
+  }
+}
