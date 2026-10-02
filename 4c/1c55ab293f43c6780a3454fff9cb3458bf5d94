@@ -1,0 +1,45 @@
+README.md
+  s_45edf4791eaef8::t_b5c177c7287e3d 1,3-5,7-167
+crates/dragonfly-core/README.md
+  s_45edf4791eaef8::t_a7e00e443c4792 3
+crates/engine-model/examples/validation_sweep/main.rs
+  s_45edf4791eaef8::t_857455f6749ea0 312,314,318,322,324,326,330,332,338,344,350,356,360-361,369-379
+crates/twin-core/README.md
+  s_45edf4791eaef8::t_52c84c6901ddd3 3,5,9,11-12,27
+crates/twin-core/examples/signature_matrix.rs
+  s_45edf4791eaef8::t_00a8a1e2da64c8 19,23-26,54,56
+docs/fault_signatures.md
+  s_45edf4791eaef8::t_c9d7e3c948d636 1-35
+docs/model_validation.md
+  s_45edf4791eaef8::t_4d845a1984282b 1-71
+docs/validation/bsfc.svg
+  s_45edf4791eaef8::t_419fff2b99e149 1-15
+docs/validation/power_altitude.svg
+  s_45edf4791eaef8::t_072001cabda577 1-14
+docs/validation/spool.svg
+  s_45edf4791eaef8::t_07f7e309be0e50 1-12
+docs/validation/temperatures_altitude.svg
+  s_45edf4791eaef8::t_b01bf075c60636 1-14
+docs/validation/turbo_altitude.svg
+  s_45edf4791eaef8::t_67592befebabbe 1-15
+docs/validation/volumetric_efficiency.svg
+  s_45edf4791eaef8::t_952c15c118b058 1-16
+ui/README.md
+  s_45edf4791eaef8::t_548be6f786d7ff 5,14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4c1c55ab293f43c6780a3454fff9cb3458bf5d94",
+  "prompts": {},
+  "sessions": {
+    "s_45edf4791eaef8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "47d01b08-74b0-410f-9049-12f006ee3a6b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Itz-Agasta <rupamgolui69@gmail.com>"
+    }
+  }
+}
