@@ -2,7 +2,7 @@
 
 Operator console. Vite + React + TypeScript, built to a static bundle that `dragonfly-core` serves on :8787 and Chromium runs fullscreen in kiosk mode.
 
-Six screens: OPS, TWIN, ANALYSIS, SIMULATE, REPLAY, FLEET. **OPS is built**; the other five render a placeholder that says so. The theme tokens are `src/index.css`.
+Seven screens: OPS, TWIN, ANALYSIS, SIMULATE, REPLAY, FLEET and EVIDENCE. FLEET is a static roster and says so on screen; the rest run on live data. The theme tokens are `src/index.css`.
 
 ## Layout
 
@@ -11,7 +11,7 @@ src/
   components/ui/    shadcn primitives, installed by CLI and edited in place
   components/app/   shell, navigation rail, mission bar   (every screen)
   components/       anything more than one screen uses
-  components/ops/   OPS only, including the mock values it still carries
+  components/<screen>/  one folder per screen: ops, twin, analysis, simulate, replay, fleet, evidence
   lib/              wire format, render loop, ring buffer, formatting, health poll
   store/            telemetry rings, cold app state, the channel registry
 ```

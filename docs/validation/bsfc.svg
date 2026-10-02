@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 420" width="760" height="420" font-family="ui-monospace,monospace">
+<rect width="760" height="420" fill="#0A0A0B"/>
+<text x="78" y="20" fill="#F0F0F2" font-size="14">Brake specific fuel consumption, sea level</text><line x1="78.0" y1="347.6" x2="742.0" y2="347.6" stroke="#232326"/>
+<text x="70.0" y="351.6" fill="#8E8E96" font-size="11" text-anchor="end">200</text><line x1="78.0" y1="235.6" x2="742.0" y2="235.6" stroke="#232326"/>
+<text x="70.0" y="239.6" fill="#8E8E96" font-size="11" text-anchor="end">250</text><line x1="78.0" y1="123.6" x2="742.0" y2="123.6" stroke="#232326"/>
+<text x="70.0" y="127.6" fill="#8E8E96" font-size="11" text-anchor="end">300</text><line x1="121.5" y1="34.0" x2="121.5" y2="370.0" stroke="#232326"/>
+<text x="121.5" y="388.0" fill="#8E8E96" font-size="11" text-anchor="middle">5.0</text><line x1="303.2" y1="34.0" x2="303.2" y2="370.0" stroke="#232326"/>
+<text x="303.2" y="388.0" fill="#8E8E96" font-size="11" text-anchor="middle">10</text><line x1="484.8" y1="34.0" x2="484.8" y2="370.0" stroke="#232326"/>
+<text x="484.8" y="388.0" fill="#8E8E96" font-size="11" text-anchor="middle">15</text><line x1="666.5" y1="34.0" x2="666.5" y2="370.0" stroke="#232326"/>
+<text x="666.5" y="388.0" fill="#8E8E96" font-size="11" text-anchor="middle">20</text><text x="410" y="412" fill="#8E8E96" font-size="11" text-anchor="middle">brake mean effective pressure, bar</text>
+<text x="14" y="202" fill="#8E8E96" font-size="11" text-anchor="middle" transform="rotate(-90 14 202)">BSFC, g/kWh</text><polyline points="95.51,158.33 170.23,257.42 220.40,265.29 263.01,258.49 299.55,244.12 331.57,225.91 360.32,207.51 360.32,207.51 360.32,207.51 360.32,207.51 360.32,207.51 360.32,207.51 360.32,207.51 " fill="none" stroke="#F0F0F2" stroke-width="2"/><line x1="653" y1="50" x2="677" y2="50" stroke="#F0F0F2" stroke-width="2"/>
+<text x="683" y="54" fill="#8E8E96" font-size="11">2200 rpm</text><polyline points="95.51,158.33 157.77,226.62 211.92,248.74 266.52,264.25 319.44,273.02 370.95,277.95 422.97,282.37 475.62,286.53 528.77,290.38 582.20,293.81 635.68,296.74 689.00,299.15 742.00,301.05 " fill="none" stroke="#FF6B35" stroke-width="2"/><line x1="653" y1="66" x2="677" y2="66" stroke="#FF6B35" stroke-width="2"/>
+<text x="683" y="70" fill="#8E8E96" font-size="11">2800 rpm</text><polyline points="90.78,138.35 143.27,186.08 196.30,215.43 249.87,235.72 303.26,249.75 356.34,259.80 409.09,267.19 461.49,272.74 513.54,276.97 565.25,280.21 616.63,282.70 667.66,284.59 718.34,286.02 " fill="none" stroke="#8E8E96" stroke-width="2"/><line x1="653" y1="82" x2="677" y2="82" stroke="#8E8E96" stroke-width="2"/>
+<text x="683" y="86" fill="#8E8E96" font-size="11">3400 rpm</text><polyline points="78.00,77.52 131.02,147.01 182.36,182.08 235.12,207.75 287.71,225.35 339.97,237.87 391.88,247.07 443.41,253.97 494.57,259.22 545.35,263.26 595.75,266.37 645.76,268.74 695.38,270.53 " fill="none" stroke="#6E6E76" stroke-width="2"/><line x1="653" y1="98" x2="677" y2="98" stroke="#6E6E76" stroke-width="2"/>
+<text x="683" y="102" fill="#8E8E96" font-size="11">3880 rpm</text></svg>
